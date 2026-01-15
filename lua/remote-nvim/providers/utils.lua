@@ -155,7 +155,7 @@ function M.get_offline_neovim_release_name(os, version, arch, release_type)
 
   if os == "Linux" then
     if (version == "nightly") or (version == "stable") or is_later_neovim_version(version, "v0.10.3") then
-      return ("nvim-%s-linux-%s.appimage"):format(version, arch)
+      return ("nvim-linux-%s.appimage"):format(arch)
     end
     return ("nvim-%s-linux.appimage"):format(version)
   elseif os == "macOS" then

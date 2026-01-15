@@ -223,7 +223,7 @@ M.setup = function(opts)
     )
   end
   M.config =
-    require("remote-nvim.deprecation").handle_deprecations(vim.tbl_deep_extend("force", M.default_opts, opts or {}))
+      require("remote-nvim.deprecation").handle_deprecations(vim.tbl_deep_extend("force", M.default_opts, opts or {}))
 
   M.session_provider = require("remote-nvim.providers.session_provider")()
   require("remote-nvim.command")

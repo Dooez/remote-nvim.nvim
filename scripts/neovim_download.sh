@@ -32,26 +32,26 @@ function download_neovim() {
 	local download_path
 	local checksum_path
 	local expected_checksum
-	local actual_checksum
+
 	download_url=$(build_github_uri "$version" "$os" "$arch_type")
 	download_path="$download_dir/$(basename "$download_url")"
 
 	checksum_path="$download_path".sha256sum
-	actual_checksum="$expected_checksum-actual" # This ensures that they do not match
 	expected_checksum=$(get_sha256 "$version" "$os" "$arch_type")
 
 	if [ -e "$download_path" ] && [ -e "$checksum_path" ]; then
-		expected_checksum=$(<"$checksum_path")
-		actual_checksum=$(sha256sum "$download_path" | cut -d ' ' -f 1)
+		# local actual_cehcksum=$(<"$checksum_path")
+		local actual_checksum=$(sha256sum "$download_path" | cut -d ' ' -f 1)
+		if [ "$actual_checksum" == "$expected_checksum" ]; then
+			info "Existing installation with matching checksum found. Skipping downloading..."
+			return 0
+    	else
+		    info "Existing installation found with mismatched checksum. Downloading..."
+		fi
 	fi
-
-	if [ "$actual_checksum" == "$expected_checksum" ]; then
-		info "Existing installation with matching checksum found. Skipping downloading..."
-		return 0
-	fi
-
 	download_file "$download_url" "$download_path"
-	info "Downloaded Neovim release ${version} for ${os} (${arch_type}) to ${download_path}"
+	echo "$expected_checksum" > "$checksum_path"
+	debug "Downloaded Neovim release ${version} for ${os} (${arch_type}) to ${download_path}"
 }
 
 # Download Neovim source
