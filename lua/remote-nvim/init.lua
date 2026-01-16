@@ -68,6 +68,7 @@ local utils = require("remote-nvim.utils")
 
 ---@class remote-nvim.config.PluginConfig.Remote.CopyDirs
 ---@field config remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure Directory to copy over into remote XDG_CONFIG_HOME/nvim. Default is output of :lua= vim.fn.stdpath("config"). Default `base` when not specified is vim.fn.stdpath("config").
+---@field dot_config remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure Directory to copy over into remote XDG_CONFIG_HOME/nvim. Default is output of :lua= vim.fn.stdpath("config"). Default `base` when not specified is vim.fn.stdpath("config").
 ---@field data remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure Directory to copy over into remote XDG_DATA_HOME/nvim. Default is nothing. If base is not specified, it is assumed to be :lua= vim.fn.stdpath("data")
 ---@field state remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure Directory to copy over into remote XDG_STATE_HOME/nvim. Default is nothing. If base is not specified, it is assumed to be :lua= vim.fn.stdpath("state")
 ---@field cache remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure Directory to copy over into remote XDG_CACHE_HOME/nvim. Default is nothing. If base is not specified, it is assumed to be :lua= vim.fn.stdpath("cache")
@@ -146,6 +147,14 @@ M.default_opts = {
   remote = {
     app_name = "nvim",
     copy_dirs = {
+      dot_config = {
+        ---@diagnostic disable-next-line:assign-type-mismatch
+        base = utils.path_join(utils.is_windows, vim.fn.stdpath("config"), ".."),
+        dirs = {},
+        compression = {
+          enabled = true,
+        },
+      },
       config = {
         ---@diagnostic disable-next-line:assign-type-mismatch
         base = vim.fn.stdpath("config"),

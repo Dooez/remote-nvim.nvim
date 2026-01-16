@@ -14,6 +14,7 @@
 ---@field remote_neovim_home string? Path on remote host where remote-neovim installs/configures things
 ---@field neovim_install_method neovim_install_method? How was the remote Neovim installed in the workspace
 ---@field config_copy boolean? Flag indicating if the config should be copied or not
+---@field dot_config_copy boolean? Flag indicating if the .config should be copied or not
 ---@field data_copy boolean? Flag indicating if the data directories should be copied or not
 ---@field client_auto_start boolean? Flag indicating if the client should be auto started or not
 ---@field offline_mode boolean? Should we operate in offline mode
@@ -38,6 +39,7 @@
 ---@field private _local_free_port string? Free port available on local machine
 ---@field private _local_neovim_install_script_path string Local path where Neovim installation script is stored
 ---@field private _local_path_to_remote_neovim_config string[] Local path(s) containing remote Neovim configuration
+---@field private _local_path_to_remote_dot_config string[] Local path(s) containing remote .config subdirectories
 ---@field private _local_path_copy_dirs table<string, string[]> Local path(s) containing remote Neovim configuration
 ---@field private _remote_neovim_home string Directory where all remote neovim data would be stored on host
 ---@field private _remote_os string Remote host's OS
@@ -62,10 +64,12 @@
 local Provider = require("remote-nvim.middleclass")("Provider")
 
 local Executor = require("remote-nvim.providers.executor")
+local Path = require("plenary.path")
 local provider_utils = require("remote-nvim.providers.utils")
 ---@type remote-nvim.RemoteNeovim
 local remote_nvim = require("remote-nvim")
 local utils = require("remote-nvim.utils")
+local constants = require("remote-nvim.constants")
 
 ---@param copy_config remote-nvim.config.PluginConfig.Remote.CopyDirs.FolderStructure
 local function get_copy_paths(copy_config)
@@ -221,6 +225,7 @@ function Provider:_setup_workspace_variables()
       utils.path_join(self._remote_is_windows, self._remote_workspaces_path, self._remote_workspace_id)
 
   self._local_path_to_remote_neovim_config = get_copy_paths(remote_nvim.config.remote.copy_dirs.config)
+  self._local_path_to_remote_dot_config = get_copy_paths(remote_nvim.config.remote.copy_dirs.dot_config)
   self._local_path_copy_dirs = {
     data = get_copy_paths(remote_nvim.config.remote.copy_dirs.data),
     state = get_copy_paths(remote_nvim.config.remote.copy_dirs.state),
@@ -527,7 +532,7 @@ function Provider:_get_neovim_data_upload_preference()
 end
 
 ---@private
----Get user preference about copying the local neovim config to remote
+---Get user preference about copying the local config to remote
 ---@return boolean preference Should the config be copied over
 function Provider:_get_neovim_config_upload_preference()
   if self._host_config.config_copy == nil then
@@ -552,6 +557,34 @@ function Provider:_get_neovim_config_upload_preference()
   end
 
   return self._host_config.config_copy
+end
+
+---@private
+---Get user preference about copying the local config to remote
+---@return boolean preference Should the config be copied over
+function Provider:_get_dot_config_upload_preference()
+  if self._host_config.dot_config_copy == nil then
+    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
+      prompt = "Copy local .config to remote host? ",
+    })
+
+    -- Handle choices
+    if choice == "Yes (always)" then
+      self._host_config.dot_config_copy = true
+      self._config_provider:update_workspace_config(self.unique_host_id, {
+        dot_config_copy = self._host_config.dot_config_copy,
+      })
+    elseif choice == "No (never)" then
+      self._host_config.dot_config_copy = false
+      self._config_provider:update_workspace_config(self.unique_host_id, {
+        config_copy = self._host_config.dot_config_copy,
+      })
+    else
+      self._host_config.dot_config_copy = (choice == "Yes" and true) or false
+    end
+  end
+
+  return self._host_config.dot_config_copy
 end
 
 ---Verify if the server is already running or not
@@ -683,24 +716,39 @@ function Provider:_setup_remote()
         )
       )
       local local_upload_paths = { local_release_path }
-
+      local do_upload = true
       if self._remote_neovim_install_method == "binary" then
-        self:upload_if_different(
-          local_upload_paths,
-          utils.path_join(self._remote_is_windows, self:_remote_neovim_binary_dir()),
-          "Upload Neovim release from local to remote"
-        )
-      else
+        local upload_desc = "Checking remote binary installation checksum"
+        local section_node = self.progress_viewer:add_progress_node({
+          text = upload_desc,
+          type = "section_node",
+        })
+        local local_checksum = local_release_path .. ".sha256sum"
+        local remote_upload_path = utils.path_join(self._remote_is_windows, self:_remote_neovim_binary_dir())
+        local remote_checksum = remote_upload_path .. ".sha256sum"
+
+        local equal = self:compare_checksums(local_checksum, remote_checksum)
+        do_upload = not equal
+        local check_result = equal and "Upload skipped because remote already has a binary with matching checksum"
+            or "Checksums not equal. Uploading local binary"
+        self.progress_viewer:add_progress_node({
+          text = check_result,
+          type = "stdout_node",
+        })
+        self:_handle_job_completion(upload_desc, section_node)
+      end
+      if do_upload then
         self:upload(
           local_upload_paths,
           utils.path_join(self._remote_is_windows, self:_remote_neovim_binary_dir()),
           "Upload Neovim release from local to remote"
         )
+        install_neovim_cmd = install_neovim_cmd .. " -o"
+        self:run_command(install_neovim_cmd, "Installing Neovim (if required)")
       end
-      install_neovim_cmd = install_neovim_cmd .. " -o"
+    else
+      self:run_command(install_neovim_cmd, "Installing Neovim (if required)")
     end
-
-    self:run_command(install_neovim_cmd, "Installing Neovim (if required)")
 
     -- Upload user neovim config, if necessary
     if self:_get_neovim_config_upload_preference() then
@@ -712,8 +760,27 @@ function Provider:_setup_remote()
       )
     end
 
+    if not vim.tbl_isempty(self._local_path_to_remote_dot_config)
+        and self:_get_dot_config_upload_preference() then
+      self:upload(
+        self._local_path_to_remote_dot_config,
+        self._remote_xdg_config_path,
+        "Copying your .config onto remote",
+        remote_nvim.config.remote.copy_dirs.dot_config.compression
+      )
+    end
+
     -- If user has specified certain directories to copy over in the "state", "cache" or "data" directories, do it now
-    if self:_get_neovim_data_upload_preference() then
+    local to_copy_dirs = false
+    for _, local_paths in pairs(self._local_path_copy_dirs) do
+      if not vim.tbl_isempty(local_paths) then
+        to_copy_dirs = true
+        break
+      end
+    end
+
+    if to_copy_dirs
+        and self:_get_neovim_data_upload_preference() then
       for key, local_paths in pairs(self._local_path_copy_dirs) do
         if not vim.tbl_isempty(local_paths) then
           local remote_upload_path = utils.path_join(
@@ -1135,82 +1202,37 @@ function Provider:upload(local_paths, remote_path, desc, compression_opts)
 end
 
 ---@protected
----Upload data from local to remote host if the remote checksum is not equal to local
----@param local_paths string|string[] Local path
----@param remote_path string Path on the remote
----@param desc string Description of the command running
+---Download checksum from remote and compare to a local checksum
+---@param local_checksum string Local checksum path
+---@param remote_checksum string Chechsum path on the remote
 ---@param compression_opts remote-nvim.provider.Executor.JobOpts.CompressionOpts? Compression options
-function Provider:upload_if_different(local_paths, remote_path, desc, compression_opts)
-  if type(local_paths) == "string" then
-    local_paths = { local_paths }
+function Provider:compare_checksums(local_checksum, remote_checksum, compression_opts)
+  local cache_path = Path:new(utils.path_join(utils.is_windows, vim.fn.stdpath("cache"), constants.PLUGIN_NAME))
+  if not cache_path:exists() then
+    cache_path:mkdir({ parents = true, exists_ok = true }) -- Ensure that the path exists
   end
+  cache_path = cache_path:absolute()
+  local tmp_sha = utils.path_join(utils.is_windows, cache_path, "remote_checksum.sha256sum")
 
-  for _, path in ipairs(local_paths) do
-    if not require("plenary.path"):new({ path }):exists() then
-      error(("Local path '%s' does not exist"):format(path))
-    end
-    if not require("plenary.path"):new({ path .. ".sha256sum" }):exists() then
-      self:run_command(
-        ("sha256sum %s | cut -d ' ' -f 1 > %s"):format(path, path .. ".sha256sum"),
-        "Calculating checksum"
-      )
-    end
-  end
-
-  for _, path in ipairs(local_paths) do
-    local sha = path .. ".sha256sum"
-    local tmp_sha = path .. "_remote.sha256sum"
-    local remote_sha = remote_path .. ".sha256sum"
-    self.logger.fmt_debug(
-      "[%s][%s] Uploading %s to %s on remote",
-      self.provider_type,
-      self.unique_host_id,
-      path,
-      remote_path
-    )
-
-    local section_node = self.progress_viewer:add_progress_node({
-      text = desc,
-      type = "section_node",
-    })
-    self.progress_viewer:add_progress_node({
-      text = ("COPY %s -> %s"):format(remote_sha, tmp_sha),
-      type = "command_node",
-    })
-    self.executor:download(remote_sha, tmp_sha, {
-      stdout_cb = self:_get_stdout_fn_for_node(section_node),
-      compression = compression_opts or {},
-    })
-
-    local equal = vim.system({ "cmp", "-s", sha, tmp_sha }):wait().code == 0
-    os.remove(tmp_sha)
-    if equal then
-      self.progress_viewer:add_progress_node({
-        text = "Remote checksum equals local checksum. Skipping upload",
-        type = "command_node",
-      })
-      self:_handle_job_completion(desc, section_node)
-      return
-    end
-
-    self.progress_viewer:add_progress_node({
-      text = ("COPY %s -> %s"):format(path, remote_path),
-      type = "command_node",
-    })
-    self.executor:upload(path, remote_path, {
-      stdout_cb = self:_get_stdout_fn_for_node(section_node),
-      compression = compression_opts or {},
-    })
-    self.progress_viewer:add_progress_node({
-      text = ("COPY %s -> %s"):format(sha, remote_sha),
-      type = "command_node",
-    })
-    self.executor:upload(sha, remote_sha, {
-      stdout_cb = self:_get_stdout_fn_for_node(section_node),
-      compression = compression_opts or {},
-    })
-    self:_handle_job_completion(desc, section_node)
-  end
+  local section_node = self.progress_viewer:add_progress_node({
+    text = ("COPY %s -> %s"):format(remote_checksum, tmp_sha),
+    type = "command_node",
+  })
+  self.executor:download(remote_checksum, tmp_sha, {
+    stdout_cb = self:_get_stdout_fn_for_node(section_node),
+    compression = compression_opts or {},
+  })
+  local command = "cmp -s " .. local_checksum .. " " .. tmp_sha
+  local equal = false
+  self.local_executor:run_command(command, {
+    exit_cb = function(exit_code)
+      equal = exit_code == 0
+    end,
+    stdout_cb = self:_get_stdout_fn_for_node(section_node),
+  })
+  os.remove(tmp_sha)
+  self:_handle_job_completion("Compared checksums", section_node)
+  return equal
 end
 
 return Provider
