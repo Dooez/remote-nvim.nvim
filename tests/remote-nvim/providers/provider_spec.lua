@@ -117,7 +117,7 @@ describe("Provider", function()
         arch = "x86_64",
         neovim_install_method = "binary",
         connection_options = provider.conn_opts,
-        remote_neovim_home = provider._remote_neovim_home,
+        remote_neovim_home = provider._remote_pseudo_home,
         config_copy = nil,
         client_auto_start = nil,
         workspace_id = workspace_id,
@@ -160,13 +160,13 @@ describe("Provider", function()
 
     it("by correctly setting workspace variables", function()
       provider:_setup_workspace_variables()
-      local remote_home = provider._remote_neovim_home
+      local remote_home = provider._remote_pseudo_home
 
       assert.equals("Linux", provider._remote_os)
       assert.equals(false, provider._remote_is_windows)
       assert.equals("stable", provider._remote_neovim_version)
       assert.equals(workspace_id, provider._remote_workspace_id)
-      assert.equals(remote_home, provider._remote_neovim_home)
+      assert.equals(remote_home, provider._remote_pseudo_home)
       assert.equals(("%s/workspaces"):format(remote_home), provider._remote_workspaces_path)
       assert.equals(("%s/scripts"):format(remote_home), provider._remote_scripts_path)
       assert.equals(("%s/scripts/neovim_install.sh"):format(remote_home), provider._remote_neovim_install_script_path)
@@ -490,7 +490,7 @@ describe("Provider", function()
       provider:clean_up_remote_host()
       assert.stub(run_command_stub).was.called_with(
         match.is_ref(provider),
-        ("rm -rf %s"):format(provider._remote_neovim_home),
+        ("rm -rf %s"):format(provider._remote_pseudo_home),
         match.is_string(),
         nil,
         match.is_function()
@@ -556,7 +556,7 @@ describe("Provider", function()
 
   it("should provide correct remote neovim binary paths", function()
     provider._remote_is_windows = false
-    provider._remote_neovim_home = "~/.remote-nvim"
+    provider._remote_pseudo_home = "~/.remote-nvim"
     provider._remote_neovim_version = "stable"
 
     assert.equals("~/.remote-nvim/nvim-downloads/stable", provider:_remote_neovim_binary_dir())
@@ -567,11 +567,11 @@ describe("Provider", function()
     stub(provider, "run_command")
     local output_stub = stub(provider.executor, "job_stdout")
     output_stub.returns({ "/home/test-user" })
-    provider._remote_neovim_home = nil
+    provider._remote_pseudo_home = nil
 
     provider:_get_remote_neovim_home()
-    assert.equals("/home/test-user/.remote-nvim", provider._remote_neovim_home)
-    assert.equals(provider._remote_neovim_home, provider:_get_remote_neovim_home())
+    assert.equals("/home/test-user/.remote-nvim", provider._remote_pseudo_home)
+    assert.equals(provider._remote_pseudo_home, provider:_get_remote_neovim_home())
     assert.equals(provider:_get_remote_neovim_home(), provider:_get_remote_neovim_home())
   end)
 

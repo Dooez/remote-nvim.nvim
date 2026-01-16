@@ -11,19 +11,19 @@ function M.RemoteStart(opts)
   else
     ---@type remote-nvim.providers.WorkspaceConfig
     local workspace_config =
-      remote_nvim.session_provider:get_config_provider():get_workspace_config(vim.trim(host_identifier))
+        remote_nvim.session_provider:get_config_provider():get_workspace_config(vim.trim(host_identifier))
     if vim.tbl_isempty(workspace_config) then
       vim.notify("Unknown host identifier. Run :RemoteStart to connect to a new host", vim.log.levels.ERROR)
     else
       remote_nvim.session_provider
-        :get_or_initialize_session({
-          host = workspace_config.host,
-          provider_type = workspace_config.provider,
-          conn_opts = { workspace_config.connection_options },
-          unique_host_id = host_identifier,
-          devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
-        })
-        :launch_neovim()
+          :get_or_initialize_session({
+            host = workspace_config.host,
+            provider_type = workspace_config.provider,
+            conn_opts = { workspace_config.connection_options },
+            unique_host_id = host_identifier,
+            devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
+          })
+          :launch_neovim()
     end
   end
 end
@@ -35,6 +35,50 @@ vim.api.nvim_create_user_command("RemoteStart", M.RemoteStart, {
     local args = vim.split(vim.trim(line), "%s+")
     table.remove(args, 1)
     local valid_hosts = vim.tbl_keys(remote_nvim.session_provider:get_config_provider():get_workspace_config())
+    if #args == 0 then
+      return valid_hosts
+    end
+    return vim.fn.matchfuzzy(valid_hosts, args[1])
+  end,
+})
+
+function M.RemoteSync(opts)
+  local host_identifier = vim.trim(opts.args)
+  if host_identifier == "" then
+    require("telescope").extensions["remote-nvim"].connect({ session_action = "sync" })
+  else
+    ---@type remote-nvim.providers.WorkspaceConfig
+    local workspace_config =
+        remote_nvim.session_provider:get_config_provider():get_workspace_config(vim.trim(host_identifier))
+    if vim.tbl_isempty(workspace_config) then
+      vim.notify("Unknown host identifier. Run :RemoteStart to connect to a new host", vim.log.levels.ERROR)
+    else
+      remote_nvim.session_provider
+          :get_or_initialize_session({
+            host = workspace_config.host,
+            provider_type = workspace_config.provider,
+            conn_opts = { workspace_config.connection_options },
+            unique_host_id = host_identifier,
+            devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
+          })
+          :sync()
+    end
+  end
+end
+
+vim.api.nvim_create_user_command("RemoteSync", M.RemoteSync, {
+  nargs = "?",
+  desc = "Sync Neovim config with the remote machine",
+  complete = function(_, line)
+    local args = vim.split(vim.trim(line), "%s+")
+    table.remove(args, 1)
+    local hosts = remote_nvim.session_provider:get_config_provider():get_workspace_config()
+    local valid_hosts = {}
+    for k, v in pairs(hosts) do
+      if v.provider == "ssh" then
+        table.insert(valid_hosts, k)
+      end
+    end
     if #args == 0 then
       return valid_hosts
     end
@@ -66,14 +110,14 @@ function M.RemoteCleanup(opts)
       vim.notify("Unknown host identifier. Run :RemoteStart to connect to a new host", vim.log.levels.ERROR)
     else
       remote_nvim.session_provider
-        :get_or_initialize_session({
-          host = workspace_config.host,
-          provider_type = workspace_config.provider,
-          conn_opts = { workspace_config.connection_options },
-          unique_host_id = host_id,
-          devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
-        })
-        :clean_up_remote_host()
+          :get_or_initialize_session({
+            host = workspace_config.host,
+            provider_type = workspace_config.provider,
+            conn_opts = { workspace_config.connection_options },
+            unique_host_id = host_id,
+            devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
+          })
+          :clean_up_remote_host()
     end
   end
 end

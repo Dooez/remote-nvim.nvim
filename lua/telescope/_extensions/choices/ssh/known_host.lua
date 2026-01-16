@@ -42,29 +42,33 @@ local function ssh_known_host_action(opts)
   })
 
   pickers
-    .new(opts, {
-      prompt_title = "Connect to remote host",
-      previewer = previewer,
-      finder = finders.new_table({
-        results = vim.tbl_keys(hosts),
-      }),
-      sorter = conf.generic_sorter(opts),
-      attach_mappings = function(bufnr, _)
-        actions.select_default:replace(function()
-          actions.close(bufnr)
-          local selection = action_state.get_selected_entry()
-          local host = selection.value
-          remote_nvim.session_provider
-            :get_or_initialize_session({
-              host = host,
-              provider_type = "ssh",
-            })
-            :launch_neovim()
-        end)
-        return true
-      end,
-    })
-    :find()
+      .new(opts, {
+        prompt_title = "Connect to remote host",
+        previewer = previewer,
+        finder = finders.new_table({
+          results = vim.tbl_keys(hosts),
+        }),
+        sorter = conf.generic_sorter(opts),
+        attach_mappings = function(bufnr, _)
+          actions.select_default:replace(function()
+            actions.close(bufnr)
+            local selection = action_state.get_selected_entry()
+            local host = selection.value
+            local session = remote_nvim.session_provider
+                :get_or_initialize_session({
+                  host = host,
+                  provider_type = "ssh",
+                })
+            if opts.session_action == "sync" then
+              session:sync()
+            else
+              session:launch_neovim()
+            end
+          end)
+          return true
+        end,
+      })
+      :find()
 end
 
 return {

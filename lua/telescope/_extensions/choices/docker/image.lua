@@ -7,20 +7,20 @@ local function image_action(_)
   if image == "" then
     return
   end
-  remote_nvim.session_provider
-    :get_or_initialize_session({
-      host = image,
-      provider_type = "devpod",
-      unique_host_id = ps(image, ":", "-"),
-      devpod_opts = {
-        provider = "docker",
-        source_opts = {
-          type = "image",
-          id = image,
+  local session = remote_nvim.session_provider
+      :get_or_initialize_session({
+        host = image,
+        provider_type = "devpod",
+        unique_host_id = ps(image, ":", "-"),
+        devpod_opts = {
+          provider = "docker",
+          source_opts = {
+            type = "image",
+            id = image,
+          },
         },
-      },
-    })
-    :launch_neovim()
+      })
+  session:launch_neovim()
 end
 
 return {

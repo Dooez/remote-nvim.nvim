@@ -73,7 +73,7 @@ local function remote_nvim_existing_workspace_action(opts)
       for key, value in pairs(host_config) do
         if type(value) ~= "table" then
           local formatted_key =
-            string.format("%-" .. max_key_length .. "s", key:gsub("_", " "):gsub("^%l", string.upper))
+              string.format("%-" .. max_key_length .. "s", key:gsub("_", " "):gsub("^%l", string.upper))
           table.insert(lines, "  " .. formatted_key .. " : " .. tostring(value))
         end
       end
@@ -121,49 +121,60 @@ local function remote_nvim_existing_workspace_action(opts)
 
   local picker_dict = {}
   for host_id, workspace_config in pairs(config_provider:get_workspace_config()) do
+    if opts.session_action == "sync" then
+      if workspace_config.provider ~= "ssh" then
+        -- only ssh sync is supported atm
+        goto continue
+      end
+    end
     table.insert(picker_dict, {
       host_id = host_id,
       display = display_name(host_id, workspace_config),
       config = workspace_config,
     })
+    ::continue::
   end
 
   pickers
-    .new(opts, {
-      prompt_title = "Connect to saved workspace",
-      previewer = previewer,
-      finder = finders.new_table({
-        results = picker_dict,
-        entry_maker = function(entry)
-          return {
-            value = entry,
-            display = entry["display"],
-            ordinal = entry["display"],
-          }
+      .new(opts, {
+        prompt_title = "Connect to saved workspace",
+        previewer = previewer,
+        finder = finders.new_table({
+          results = picker_dict,
+          entry_maker = function(entry)
+            return {
+              value = entry,
+              display = entry["display"],
+              ordinal = entry["display"],
+            }
+          end,
+        }),
+        sorter = conf.generic_sorter(opts),
+        attach_mappings = function(prompt_bufnr, _)
+          actions.select_default:replace(function()
+            actions.close(prompt_bufnr)
+            local selection = action_state.get_selected_entry()
+            local host_identifier = selection.value["host_id"]
+            ---@type remote-nvim.providers.WorkspaceConfig
+            local workspace_data = config_provider:get_workspace_config(host_identifier)
+            local session = remote_nvim.session_provider
+                :get_or_initialize_session({
+                  host = workspace_data.host,
+                  provider_type = workspace_data.provider,
+                  unique_host_id = host_identifier,
+                  conn_opts = { workspace_data.connection_options },
+                  devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_data),
+                })
+            if opts.session_action == "sync" then
+              session:sync()
+            else
+              session:launch_neovim()
+            end
+          end)
+          return true
         end,
-      }),
-      sorter = conf.generic_sorter(opts),
-      attach_mappings = function(prompt_bufnr, _)
-        actions.select_default:replace(function()
-          actions.close(prompt_bufnr)
-          local selection = action_state.get_selected_entry()
-          local host_identifier = selection.value["host_id"]
-          ---@type remote-nvim.providers.WorkspaceConfig
-          local workspace_data = config_provider:get_workspace_config(host_identifier)
-          remote_nvim.session_provider
-            :get_or_initialize_session({
-              host = workspace_data.host,
-              provider_type = workspace_data.provider,
-              unique_host_id = host_identifier,
-              conn_opts = { workspace_data.connection_options },
-              devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_data),
-            })
-            :launch_neovim()
-        end)
-        return true
-      end,
-    })
-    :find()
+      })
+      :find()
 end
 
 return {

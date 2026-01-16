@@ -1,14 +1,16 @@
 ---@type remote-nvim.RemoteNeovim
 local remote_nvim = require("remote-nvim")
 
-local function gen_choices()
+local function gen_choices(opts)
   local choices = {}
 
   local curr_path = vim.fs.dirname(debug.getinfo(1).source:sub(2))
   assert(curr_path ~= nil, "File path to the current file should not be nil")
 
   local should_include_devpod_choices = vim.fn.executable(remote_nvim.config.devpod.binary) == 1
+      and opts.session_action ~= sync
   local should_include_docker_choices = vim.fn.executable(remote_nvim.config.devpod.docker_binary) == 1
+      and opts.session_action ~= sync
 
   local files = vim.fs.find(function(name, path)
     local should_include = name ~= "init.lua"
@@ -42,8 +44,8 @@ local function gen_choices()
   return choices
 end
 
-return function()
-  local choices = gen_choices()
+return function(opts)
+  local choices = gen_choices(opts)
   if not require("remote-nvim.providers.devpod.devpod_utils").get_devcontainer_root() then
     choices = vim.tbl_filter(function(entry)
       return entry.value ~= "devpod-launch-devcontainer"

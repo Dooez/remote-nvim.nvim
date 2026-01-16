@@ -8,7 +8,8 @@ local finders = require("telescope.finders")
 local pickers = require("telescope.pickers")
 
 local function choose_launch_option(opts)
-  local choices = require("telescope._extensions.choices")()
+  opts = opts or {}
+  local choices = require("telescope._extensions.choices")(opts)
 
   local previewer = previewers.new_buffer_previewer({
     define_preview = function(self, entry)
@@ -30,32 +31,32 @@ local function choose_launch_option(opts)
   })
 
   pickers
-    .new(opts, {
-      prompt_title = "Filter launch options",
-      previewer = previewer,
-      finder = finders.new_table({
-        results = choices,
-        entry_maker = function(entry)
-          return {
-            display = entry.name,
-            ordinal = entry.name,
-            value = entry.value,
-            action = entry.action,
-            preview_text = entry.help,
-          }
+      .new(opts, {
+        prompt_title = "Filter launch options",
+        previewer = previewer,
+        finder = finders.new_table({
+          results = choices,
+          entry_maker = function(entry)
+            return {
+              display = entry.name,
+              ordinal = entry.name,
+              value = entry.value,
+              action = entry.action,
+              preview_text = entry.help,
+            }
+          end,
+        }),
+        sorter = conf.generic_sorter(opts),
+        attach_mappings = function(bufnr, _)
+          actions.select_default:replace(function()
+            local selection = action_state.get_selected_entry()
+            actions.close(bufnr)
+            selection.action(opts)
+          end)
+          return true
         end,
-      }),
-      sorter = conf.generic_sorter(opts),
-      attach_mappings = function(bufnr, _)
-        actions.select_default:replace(function()
-          local selection = action_state.get_selected_entry()
-          actions.close(bufnr)
-          selection.action(opts)
-        end)
-        return true
-      end,
-    })
-    :find()
+      })
+      :find()
 end
 
 return telescope.register_extension({

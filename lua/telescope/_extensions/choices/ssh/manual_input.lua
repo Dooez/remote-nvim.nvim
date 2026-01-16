@@ -1,7 +1,7 @@
 ---@type remote-nvim.RemoteNeovim
 local remote_nvim = require("remote-nvim")
 
-local function ssh_manual_action(_)
+local function ssh_manual_action(opts)
   local ssh_args = vim.trim(vim.fn.input("ssh "))
   if ssh_args == "" then
     return
@@ -23,13 +23,18 @@ local function ssh_manual_action(_)
     vim.notify("Failed to determine the host to connect to. Aborting..", vim.log.levels.ERROR)
     return
   end
-  remote_nvim.session_provider
-    :get_or_initialize_session({
-      host = ssh_host,
-      provider_type = "ssh",
-      conn_opts = { ssh_args },
-    })
-    :launch_neovim()
+  local session =
+      remote_nvim.session_provider
+      :get_or_initialize_session({
+        host = ssh_host,
+        provider_type = "ssh",
+        conn_opts = { ssh_args },
+      })
+  if opts.session_action == "sync" then
+    session:sync()
+  else
+    session:launch_neovim()
+  end
 end
 
 return {

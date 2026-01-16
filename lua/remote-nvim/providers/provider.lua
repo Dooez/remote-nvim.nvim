@@ -141,7 +141,10 @@ end
 
 ---@protected
 ---Setup workspace variables
-function Provider:_setup_workspace_variables()
+---@param sync boolean Should prompt to update workspace id
+function Provider:_setup_workspace_variables(sync)
+  local new_workspace = false
+  local rename_id
   if vim.tbl_isempty(self._config_provider:get_workspace_config(self.unique_host_id)) then
     self.logger.debug("Did not find any existing configuration. Creating one now..")
     self:run_command("echo 'Hello'", "Testing remote connection")
@@ -154,10 +157,26 @@ function Provider:_setup_workspace_variables()
       client_auto_start = nil,
       workspace_id = utils.generate_random_string(10),
     })
+    sync = true
+    new_workspace = true
   else
     self.logger.debug("Found an existing configuration. Re-using the same configuration..")
   end
   self._host_config = self._config_provider:get_workspace_config(self.unique_host_id)
+  if sync then
+    rename_id = self:_get_neovim_workspace_id_preference()
+
+    self._host_config.neovim_version = nil
+    self._host_config.remote_neovim_home = nil
+    self._host_config.neovim_install_method = nil
+    self._host_config.config_copy = nil
+    self._host_config.dot_config_copy = nil
+    self._host_config.data_copy = nil
+    self._host_config.client_auto_start = nil
+    self._host_config.offline_mode = nil
+    self._config_provider:update_workspace_config(self.unique_host_id)
+    self._config_provider:update_workspace_config(self.unique_host_id, self._host_config)
+  end
 
   -- Gather remote OS information
   if self._host_config.os == nil or self._host_config.arch == nil then
@@ -209,7 +228,6 @@ function Provider:_setup_workspace_variables()
   self._remote_is_windows = self._remote_os == "Windows" and true or false
 
   -- Set up remaining workspace variables
-  self._remote_workspace_id = self._host_config.workspace_id
   self._remote_workspaces_path = utils.path_join(self._remote_is_windows, self._remote_neovim_home, "workspaces")
   self._remote_scripts_path = utils.path_join(self._remote_is_windows, self._remote_neovim_home, "scripts")
   self._remote_neovim_install_script_path = utils.path_join(
@@ -221,6 +239,18 @@ function Provider:_setup_workspace_variables()
       utils.path_join(self._remote_is_windows, self._remote_scripts_path, "neovim_download.sh")
   self._remote_neovim_utils_script_path =
       utils.path_join(self._remote_is_windows, self._remote_scripts_path, "utils/neovim.sh")
+
+  if rename_id ~= nil then
+    if not new_workspace then
+      local old_id = self._host_config.workspace_id
+      local old_workspace_path = utils.path_join(self._remote_is_windows, self._remote_workspaces_path, old_id)
+      local new_workspace_path = utils.path_join(self._remote_is_windows, self._remote_workspaces_path, rename_id)
+      self:run_command(("mv %s %s"):format(old_workspace_path, new_workspace_path),
+        ("Changing remote workspace id from %s to %s"):format(old_workspace_path, new_workspace_path))
+    end
+    self._config_provider:update_workspace_config(self.unique_host_id, { workspace_id = rename_id })
+  end
+  self._remote_workspace_id = self._host_config.workspace_id
   self._remote_workspace_id_path =
       utils.path_join(self._remote_is_windows, self._remote_workspaces_path, self._remote_workspace_id)
 
@@ -418,6 +448,27 @@ function Provider:get_selection(choices, selection_opts)
 end
 
 ---@private
+---Get user preference about workspace id
+---@return str? worksapce_id Should the config be copied over
+function Provider:_get_neovim_workspace_id_preference()
+  local choice = self:get_selection({ "Yes", "No" }, {
+    prompt = "Provide user-defined workspace id? ",
+  })
+
+  -- Handle choices
+  if choice == "No" then
+    return nil
+  end
+  local workspace_id = vim.trim(vim.fn.input("workspace id: "))
+  local charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+  if string.find(workspace_id, "[^" .. charset .. "]") then
+    vim.notify("Invalid id. Id must contain symbols from set " .. charset, vim.log.levels.ERROR)
+    return nil
+  end
+  return workspace_id
+end
+
+---@private
 ---Get neovim version to be run on the remote host
 ---@param prompt_title string Title string for the prompt
 ---@return string neovim_version Version running on the remote host
@@ -577,7 +628,7 @@ function Provider:_get_dot_config_upload_preference()
     elseif choice == "No (never)" then
       self._host_config.dot_config_copy = false
       self._config_provider:update_workspace_config(self.unique_host_id, {
-        config_copy = self._host_config.dot_config_copy,
+        dot_config_copy = self._host_config.dot_config_copy,
       })
     else
       self._host_config.dot_config_copy = (choice == "Yes" and true) or false
@@ -614,6 +665,7 @@ end
 
 ---@private
 ---Setup remote
+---@param sync boolean Should update all settings
 function Provider:_setup_remote()
   if not self._setup_running then
     self._setup_running = true
@@ -1009,6 +1061,19 @@ function Provider:launch_neovim()
   self:_run_code_in_coroutine(function()
     self:_launch_neovim()
   end, "Setting up Neovim on remote host")
+end
+
+function Provider:sync()
+  self:_run_code_in_coroutine(function()
+      self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_host_id))
+      if not self:is_remote_server_running() then
+        self:start_progress_view_run(("Sync Neovim with remote (Run no. %s)"):format(self._neovim_launch_number))
+        self:_setup_workspace_variables(true)
+        self:_setup_remote()
+        self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
+      end
+    end,
+    "Syncing up Neovim on remote host")
 end
 
 ---Stop running Neovim instance (if any)
