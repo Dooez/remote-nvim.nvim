@@ -531,6 +531,13 @@ require("remote-nvim").setup({
           additional_opts = { "--exclude-vcs" }, -- Any arguments that can be passed to `tar` for compression can be specified here to improve your compression
         },
       },
+      -- dot_config = {
+      --   base = vim.fn.stdpath("config").."/../", -- Assumed config directory
+      --   dirs = {},
+      --   compression = {
+      --     enabled = true,
+      --   },
+      -- },
       -- cache = {
       --   base = vim.fn.stdpath("cache"),
       --   dirs = {},
@@ -553,6 +560,8 @@ require("remote-nvim").setup({
 The above configuration indicates that the `lazy` directory inside your Neovim `data` directory should be copied over
 onto the remote in it's `data` directory. You can similarly specify what should be copied inside the `data`, `state`,
 `cache` or `config` directory on remote.
+`dot_config` is an alias for `.config` and directories specified in `dot_config.dirs` will be acessible in
+remote workspace. Useful when neovim calls external tools since remote neovim is launched with modified `XDG_CONFIG_HOME`.
 
 If specified directories are going to contain a lot of data, it's _highly recommended_ to enable compression when
 uploading by setting `compression.enabled` to `true` for those particular uploads.
@@ -564,8 +573,7 @@ uploading by setting `compression.enabled` to `true` for those particular upload
   and prevent orphan Neovim servers.
 - The current implementation launches a headless server on the remote machine and then launches a TUI to connect
   to it. This means that if you quit the TUI using regular operations, the server also gets closed. If you just want
-  to close the TUI, that is currently not possible. You can read more in [this Neovim
-  discussion](https://github.com/neovim/neovim/issues/23093).
+  to close the TUI, use :detach command.
 - Neovim versions `< v0.9.2` are incompatible with versions `>= v0.9.2` due to a breaking UI change introduced in
   `v0.9.2`. For more information, read the [release notes for
   v0.9.2](https://github.com/neovim/neovim/releases/tag/v0.9.2).
@@ -581,7 +589,7 @@ This plugins provide some additional nice-to have features on top:
 - Can copy over your local Neovim configuration to remote
 - Allows easy re-connection to past sessions
 - Makes it easy to clean up remote machine changes once you are done
-- It launches Neovim server on the remote server and connects a UI to it locally. 
+- It launches Neovim server on the remote server and connects a UI to it locally.
 
 You can read more in [this Neovim discussion](https://github.com/amitds1997/remote-nvim.nvim/discussions/145)
 
