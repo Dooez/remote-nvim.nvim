@@ -51,7 +51,7 @@ function M.RemoteSync(opts)
     local workspace_config =
         remote_nvim.session_provider:get_config_provider():get_workspace_config(vim.trim(host_identifier))
     if vim.tbl_isempty(workspace_config) then
-      vim.notify("Unknown host identifier. Run :RemoteStart to connect to a new host", vim.log.levels.ERROR)
+      vim.notify("Unknown host identifier. Run :RemoteStart or :RemoteSync to setup new host", vim.log.levels.ERROR)
     else
       remote_nvim.session_provider
           :get_or_initialize_session({
