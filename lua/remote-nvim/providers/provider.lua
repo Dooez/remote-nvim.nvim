@@ -147,7 +147,7 @@ end
 
 ---@protected
 ---Setup workspace variables
----@param sync boolean Should prompt to update workspace id
+---@param sync boolean? Should prompt to update workspace id
 function Provider:_setup_workspace_variables(sync)
   local new_workspace = false
   local rename_id
@@ -884,7 +884,7 @@ function Provider:_spawn_remote_neovim_server()
   )
 
   -- Launch Neovim server and port forward
-  local port_forward_opts = ([[-t -L %s:localhost:%s]]):format(self._local_free_port, remote_free_port)
+  local port_forward_opts = { "-t", "-L", ("%s:localhost:%s"):format(self._local_free_port, remote_free_port) }
   local remote_server_launch_cmd = ([[XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s XDG_STATE_HOME=%s XDG_CACHE_HOME=%s NVIM_APPNAME=%s %s --listen 0.0.0.0:%s --headless]])
       :format(
         self._remote_xdg_config_path,
@@ -895,15 +895,15 @@ function Provider:_spawn_remote_neovim_server()
         self:_remote_neovim_binary_path(),
         remote_free_port
       )
+
   local session_info = {
     unique_host_id = self.unique_host_id,
     workspace_id = self._remote_workspace_id,
     local_port = self._local_free_port,
-    remote_port = remote_free_port,
   }
 
   self:_run_code_in_coroutine(function()
-    self.executor:new_session(session_info, remote_server_launch_cmd)
+    self.executor:new_session(session_info, remote_server_launch_cmd, port_forward_opts)
   end, "Spawning Remote Neovim server")
   self.progress_viewer:add_session_node({
     type = "info_node",
@@ -1120,9 +1120,10 @@ end
 
 function Provider:sync()
   self:_run_code_in_coroutine(function()
-      self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_host_id))
+      self.logger.fmt_debug(("[%s][%s] Starting sync with remote"):format(self.provider_type, self.unique_host_id))
       if not self:is_remote_server_running() then
         self:start_progress_view_run(("Sync Neovim with remote (Run no. %s)"):format(self._neovim_launch_number))
+        self._neovim_launch_number = self._neovim_launch_number + 1
         self:_setup_workspace_variables(true)
         self:_setup_remote()
         self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
@@ -1133,16 +1134,18 @@ end
 
 function Provider:spawn()
   self:_run_code_in_coroutine(function()
-      self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_host_id))
+      self.logger.fmt_debug(("[%s][%s] Spawning new neovim server on remote"):format(self.provider_type,
+        self.unique_host_id))
       if not self:is_remote_server_running() then
-        self:start_progress_view_run(("Spawn new client"):format(self._neovim_launch_number))
+        self:start_progress_view_run(("Spawn new client (Run no. %s)"):format(self._neovim_launch_number))
+        self._neovim_launch_number = self._neovim_launch_number + 1
         self:_setup_workspace_variables()
         self:_setup_remote()
         self:_spawn_remote_neovim_server()
-        self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
+        self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))
       end
     end,
-    "Syncing up Neovim on remote host")
+    "Spawning noeim server on remote")
 end
 
 ---Stop running Neovim instance (if any)

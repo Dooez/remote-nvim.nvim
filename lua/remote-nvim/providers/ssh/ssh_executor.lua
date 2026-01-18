@@ -202,12 +202,12 @@ local function save_sessions(sessions)
   session_path:write(vim.json.encode(sessions), "w")
 end
 ---@return table<string, remote-nvim.provider.Executor.SessionInfo> sessions Currently active sessions
-function SSHExecutor:update_sessions()
+function SSHExecutor.update_sessions()
   local path = get_or_create_sock_path()
-  local files = ScanDir(path)
+  local files = ScanDir.scan_dir(path)
   local session_ids = {}
-  for i, v in ipairs(files) do
-    local id = v:match("^session_(%w+)%.sock%")
+  for _, v in ipairs(files) do
+    local id = v:match("session_([%w_]+)%.sock")
     if id then
       table.insert(session_ids, id)
     else
@@ -222,48 +222,72 @@ function SSHExecutor:update_sessions()
     else
       vim.notify(("Found session socket with session_id '%s' with missing info. Closing..."):format(id),
         vim.log.levels.ERROR)
-      self.close_session(id)
+      SSHExecutor.close_sessions(id)
     end
   end
   save_sessions(new_session_data)
   return new_session_data
 end
 
----@param id string Session id to close
-function SSHExecutor:close_session(id)
-  local socket_path = Path:new(get_or_create_sock_path(), "session_" .. id .. ".sock"):absolute()
-  vim.system({ "ssh", "-S", socket_path, "-O exit", "dummyhost" })
+---@param opts string|string[] options to split into an array
+---@return string[] split_options
+local split_opts = function(opts)
+  local input_opts = type(opts) == "string" and { opts } or opts
+  local new_opts = {}
+  for _, str in ipairs(input_opts) do
+    for opt in str:gmatch("%S+") do
+      table.insert(new_opts, opt)
+    end
+  end
+  return new_opts
+end
+
+---@param ids string|string[] Session ids to close
+function SSHExecutor.close_sessions(ids)
+  if type(ids) == "string" then
+    ids = { ids }
+  end
+  ids = ids or {}
   local session_data = read_sessions()
-  session_data[id] = nil
+  for _, id in ipairs(ids) do
+    local socket_path = Path:new(get_or_create_sock_path(), "session_" .. id .. ".sock"):absolute()
+    utils.get_logger().debug(("killing %s"):format(socket_path))
+
+    vim.system({ "ssh", "-S", socket_path, "-O", "exit", "dummyhost" })
+    session_data[id] = nil
+  end
   save_sessions(session_data)
 end
 
 ---@param session_info remote-nvim.provider.Executor.SessionInfo
 ---@param cmd string ssh launch arguments
-function SSHExecutor:new_session(session_info, cmd)
+---@param extra_opts string|string[] extra options passed to the underlying command
+function SSHExecutor:new_session(session_info, cmd, extra_opts)
   local logger = utils.get_logger()
+  local extra_opts_tbl = split_opts(extra_opts)
+
+  local sessions = self.update_sessions()
+  if session_info.session_id and sessions[session_info.session_id] then
+    error(("Session with id %s is already exists"):format(session_info.session_id), vim.log.levels.ERROR)
+  end
   session_info.session_id = session_info.session_id or utils.generate_random_string(10)
+
   local socket_path = Path:new(get_or_create_sock_path(), "session_" .. session_info.session_id .. ".sock"):absolute()
-  local ssh_args = {
-    "-M",
-    "-S", socket_path,
-    "-t",
-    "-L", ("%s:localhost:%s"):format(session_info.local_port, session_info.remote_port),
-    self.ssh_conn_opts,
-    self.host,
-    cmd,
-  }
+  local ssh_args = { "-M", "-S", socket_path }
+  vim.list_extend(ssh_args, extra_opts_tbl)
+  vim.list_extend(ssh_args, { self.ssh_conn_opts, self.host, cmd })
 
   local uv = vim.uv or vim.loop
-  local handle, pid = uv.spawn(self.ssh_binary, { args = ssh_args, detached = false, },
-    function(code, signal)
-      logger.debug(("code: %s, signal: %s"):format(code, signal))
-    end)
+
+  local handle, pid = uv.spawn(self.ssh_binary, { args = ssh_args, detached = true, })
   if not pid then
-    logger.error("Could not spawn new session")
-    return
+    error("Could not spawn new session")
   end
   uv.unref(handle)
+
+  sessions[session_info.session_id] = session_info
+  save_sessions(sessions)
+  logger.debug(("Spawned: %s %s"):format(self.ssh_binary, table.concat(ssh_args, " ")))
 end
 
 return SSHExecutor

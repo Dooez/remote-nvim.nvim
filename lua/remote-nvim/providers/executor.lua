@@ -156,16 +156,17 @@ function Executor:update_sessions()
   return {}
 end
 
----@param id string Session id to close
+---@param ids string|string[] Session ids to close
 ---@diagnostic disable-next-line: unused-local
-function Executor:close_session(id)
+function Executor:close_sessions(ids)
   error("Not implemented")
 end
 
 ---@param session_info remote-nvim.provider.Executor.SessionInfo
 ---@param cmd string ssh launch arguments
+---@param extra_opts string|string[] extra options passed to the underlying command
 ---@diagnostic disable-next-line: unused-local
-function Executor.new_session(session_info, cmd)
+function Executor:new_session(session_info, cmd, extra_opts)
   error("Not implemented")
 end
 
