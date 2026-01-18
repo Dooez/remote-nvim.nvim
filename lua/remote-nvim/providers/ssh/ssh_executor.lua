@@ -1,4 +1,7 @@
 local Executor = require("remote-nvim.providers.executor")
+local Path = require("plenary.path")
+local ScanDir = require("plenary.scandir")
+local const = require("remote-nvim.constants")
 local utils = require("remote-nvim.utils")
 
 ---@class remote-nvim.providers.ssh.SSHExecutor: remote-nvim.providers.Executor
@@ -60,12 +63,13 @@ function SSHExecutor:upload(localSrcPath, remoteDestPath, job_opts)
       ("tar xvzf - -C %s && chown -R $(whoami) %s"):format(remoteDestPath, remoteDestPath),
       job_opts
     )
-    local tar_command = ("tar czf - --no-xattrs %s %s --numeric-owner --no-acls --no-same-owner --no-same-permissions -C %s %s"):format(
-      utils.os_name() == "macOS" and "--disable-copyfile" or "",
-      table.concat(job_opts.compression.additional_opts or {}, " "),
-      parent_dir,
-      table.concat(subdirs, " ")
-    )
+    local tar_command = ("tar czf - --no-xattrs %s %s --numeric-owner --no-acls --no-same-owner --no-same-permissions -C %s %s")
+        :format(
+          utils.os_name() == "macOS" and "--disable-copyfile" or "",
+          table.concat(job_opts.compression.additional_opts or {}, " "),
+          parent_dir,
+          table.concat(subdirs, " ")
+        )
     local command = ("%s | %s"):format(tar_command, ssh_command)
     return self:run_executor_job(command, job_opts)
   else
@@ -98,7 +102,7 @@ function SSHExecutor:_build_run_command(command, job_opts)
 
   -- Append additional connection options (if any)
   local conn_opts = job_opts.additional_conn_opts == nil and self.ssh_conn_opts
-    or (self.ssh_conn_opts .. " " .. job_opts.additional_conn_opts)
+      or (self.ssh_conn_opts .. " " .. job_opts.additional_conn_opts)
 
   -- Generate connection details (conn_opts + host)
   local host_conn_opts = conn_opts == "" and self.host or conn_opts .. " " .. self.host
@@ -169,6 +173,97 @@ function SSHExecutor:process_job_completion(exit_code)
       end
     end
   end
+end
+
+local function get_or_create_sock_path()
+  local sock_path = Path:new((vim.uv or vim.loop).os_tmpdir(), const.PLUGIN_NAME)
+  if not sock_path:exists() then
+    sock_path:mkdir({ parents = true, exists_ok = true })
+  end
+  return sock_path:absolute()
+end
+
+---@return table<string, remote-nvim.provider.Executor.SessionInfo> saved_sessions Sessions infos saved
+local function read_sessions()
+  local session_path = Path:new({ vim.fn.stdpath("data"), const.PLUGIN_NAME, "sessions.json" })
+  session_path:touch({ mode = 493, parents = true }) -- Ensure that the path exists
+  local session_data = session_path:read()
+  if session_data == "" then
+    return {}
+  else
+    return vim.json.decode(session_data)
+  end
+end
+
+---@param sessions table<string, remote-nvim.provider.Executor.SessionInfo> Sessions infos to save
+local function save_sessions(sessions)
+  local session_path = Path:new({ vim.fn.stdpath("data"), const.PLUGIN_NAME, "sessions.json" })
+  session_path:touch({ mode = 493, parents = true }) -- Ensure that the path exists
+  session_path:write(vim.json.encode(sessions), "w")
+end
+---@return table<string, remote-nvim.provider.Executor.SessionInfo> sessions Currently active sessions
+function SSHExecutor:update_sessions()
+  local path = get_or_create_sock_path()
+  local files = ScanDir(path)
+  local session_ids = {}
+  for i, v in ipairs(files) do
+    local id = v:match("^session_(%w+)%.sock%")
+    if id then
+      table.insert(session_ids, id)
+    else
+      vim.notify(("Found session socket with unexpected name '%s'. Skipping..."):format(v), vim.log.levels.WARNING)
+    end
+  end
+  local old_session_data = read_sessions()
+  local new_session_data = {}
+  for _, id in ipairs(session_ids) do
+    if old_session_data[id] then
+      new_session_data[id] = old_session_data[id]
+    else
+      vim.notify(("Found session socket with session_id '%s' with missing info. Closing..."):format(id),
+        vim.log.levels.ERROR)
+      self.close_session(id)
+    end
+  end
+  save_sessions(new_session_data)
+  return new_session_data
+end
+
+---@param id string Session id to close
+function SSHExecutor:close_session(id)
+  local socket_path = Path:new(get_or_create_sock_path(), "session_" .. id .. ".sock"):absolute()
+  vim.system({ "ssh", "-S", socket_path, "-O exit", "dummyhost" })
+  local session_data = read_sessions()
+  session_data[id] = nil
+  save_sessions(session_data)
+end
+
+---@param session_info remote-nvim.provider.Executor.SessionInfo
+---@param cmd string ssh launch arguments
+function SSHExecutor:new_session(session_info, cmd)
+  local logger = utils.get_logger()
+  session_info.session_id = session_info.session_id or utils.generate_random_string(10)
+  local socket_path = Path:new(get_or_create_sock_path(), "session_" .. session_info.session_id .. ".sock"):absolute()
+  local ssh_args = {
+    "-M",
+    "-S", socket_path,
+    "-t",
+    "-L", ("%s:localhost:%s"):format(session_info.local_port, session_info.remote_port),
+    self.ssh_conn_opts,
+    self.host,
+    cmd,
+  }
+
+  local uv = vim.uv or vim.loop
+  local handle, pid = uv.spawn(self.ssh_binary, { args = ssh_args, detached = false, },
+    function(code, signal)
+      logger.debug(("code: %s, signal: %s"):format(code, signal))
+    end)
+  if not pid then
+    logger.error("Could not spawn new session")
+    return
+  end
+  uv.unref(handle)
 end
 
 return SSHExecutor

@@ -54,16 +54,11 @@ local function ssh_known_host_action(opts)
             actions.close(bufnr)
             local selection = action_state.get_selected_entry()
             local host = selection.value
-            local session = remote_nvim.session_provider
+            remote_nvim.session_provider
                 :get_or_initialize_session({
                   host = host,
                   provider_type = "ssh",
-                })
-            if opts.session_action == "sync" then
-              session:sync()
-            else
-              session:launch_neovim()
-            end
+                }):session_action(opts)
           end)
           return true
         end,

@@ -121,11 +121,9 @@ local function remote_nvim_existing_workspace_action(opts)
 
   local picker_dict = {}
   for host_id, workspace_config in pairs(config_provider:get_workspace_config()) do
-    if opts.session_action == "sync" then
-      if workspace_config.provider ~= "ssh" then
-        -- only ssh sync is supported atm
-        goto continue
-      end
+    if opts.session_action ~= "launch" and workspace_config.provider ~= "ssh" then
+      -- only ssh actions is supported atm
+      goto continue
     end
     table.insert(picker_dict, {
       host_id = host_id,
@@ -157,19 +155,14 @@ local function remote_nvim_existing_workspace_action(opts)
             local host_identifier = selection.value["host_id"]
             ---@type remote-nvim.providers.WorkspaceConfig
             local workspace_data = config_provider:get_workspace_config(host_identifier)
-            local session = remote_nvim.session_provider
+            remote_nvim.session_provider
                 :get_or_initialize_session({
                   host = workspace_data.host,
                   provider_type = workspace_data.provider,
                   unique_host_id = host_identifier,
                   conn_opts = { workspace_data.connection_options },
                   devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_data),
-                })
-            if opts.session_action == "sync" then
-              session:sync()
-            else
-              session:launch_neovim()
-            end
+                }):session_action(opts)
           end)
           return true
         end,

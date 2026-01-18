@@ -8,9 +8,9 @@ local function gen_choices(opts)
   assert(curr_path ~= nil, "File path to the current file should not be nil")
 
   local should_include_devpod_choices = vim.fn.executable(remote_nvim.config.devpod.binary) == 1
-      and opts.session_action ~= sync
+      and opts.session_action == "launch"
   local should_include_docker_choices = vim.fn.executable(remote_nvim.config.devpod.docker_binary) == 1
-      and opts.session_action ~= sync
+      and opts.session_action == "launch"
 
   local files = vim.fs.find(function(name, path)
     local should_include = name ~= "init.lua"

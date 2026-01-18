@@ -23,18 +23,12 @@ local function ssh_manual_action(opts)
     vim.notify("Failed to determine the host to connect to. Aborting..", vim.log.levels.ERROR)
     return
   end
-  local session =
-      remote_nvim.session_provider
+  remote_nvim.session_provider
       :get_or_initialize_session({
         host = ssh_host,
         provider_type = "ssh",
         conn_opts = { ssh_args },
-      })
-  if opts.session_action == "sync" then
-    session:sync()
-  else
-    session:launch_neovim()
-  end
+      }):session_action(opts)
 end
 
 return {

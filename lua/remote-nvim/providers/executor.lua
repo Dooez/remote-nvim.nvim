@@ -16,6 +16,13 @@ local Executor = require("remote-nvim.middleclass")("Executor")
 ---@field exit_cb function? On exit callback
 ---@field compression remote-nvim.provider.Executor.JobOpts.CompressionOpts? Compression options; for upload and download
 
+---@class remote-nvim.provider.Executor.SessionInfo
+---@field unique_host_id string Host name
+---@field workspace_id string Host workspace identifier
+---@field session_id? string Session identifier
+---@field local_port string
+---@field remote_port string
+
 ---Initialize executor instance
 ---@param host string Host name
 ---@param conn_opts? string Connection options (passed when connecting)
@@ -142,6 +149,24 @@ end
 ---@return string[] stdout Job output separated by new lines
 function Executor:job_stdout()
   return vim.split(vim.trim(table.concat(self._job_stdout, "")), "\n")
+end
+
+---@return table<string, remote-nvim.provider.Executor.SessionInfo> sessions Currently active sessions
+function Executor:update_sessions()
+  return {}
+end
+
+---@param id string Session id to close
+---@diagnostic disable-next-line: unused-local
+function Executor:close_session(id)
+  error("Not implemented")
+end
+
+---@param session_info remote-nvim.provider.Executor.SessionInfo
+---@param cmd string ssh launch arguments
+---@diagnostic disable-next-line: unused-local
+function Executor.new_session(session_info, cmd)
+  error("Not implemented")
 end
 
 return Executor

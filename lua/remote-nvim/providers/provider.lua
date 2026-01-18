@@ -2,6 +2,7 @@
 ---@alias os_type "macOS"|"Windows"|"Linux"
 ---@alias arch_type "x86_64"|"arm64"
 ---@alias neovim_install_method "binary"|"source"|"system"
+---@alias session_action_type "launch"|"sync"|"spawn"
 
 ---@class remote-nvim.providers.WorkspaceConfig
 ---@field provider provider_type? Which provider is responsible for managing this workspace
@@ -61,6 +62,11 @@
 ---@field private _remote_neovim_utils_script_path  string Get Neovim utils script path on the remote host
 ---@field private _remote_server_process_id  integer? Process ID of the remote server job
 ---@field protected _remote_working_dir string? Working directory on the remote server
+
+
+---@class remote-nvim.providers.SessionAction
+---@field session_action session_action_type type of action to perform
+
 local Provider = require("remote-nvim.middleclass")("Provider")
 
 local Executor = require("remote-nvim.providers.executor")
@@ -857,6 +863,55 @@ function Provider:_setup_remote()
 end
 
 ---@private
+---Spawn remote server
+function Provider:_spawn_remote_neovim_server()
+  -- Find free port on remote
+  local free_port_on_remote_cmd = ("%s -l %s"):format(
+    self:_remote_neovim_binary_path(),
+    utils.path_join(self._remote_is_windows, self._remote_scripts_path, "free_port_finder.lua")
+  )
+  self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
+  local remote_free_port_output = self.executor:job_stdout()
+  local remote_free_port = remote_free_port_output[#remote_free_port_output]
+  self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_host_id, remote_free_port)
+
+  self._local_free_port = provider_utils.find_free_port()
+  self.logger.fmt_debug(
+    "[%s][%s] Local free port: %s",
+    self.provider_type,
+    self.unique_host_id,
+    self._local_free_port
+  )
+
+  -- Launch Neovim server and port forward
+  local port_forward_opts = ([[-t -L %s:localhost:%s]]):format(self._local_free_port, remote_free_port)
+  local remote_server_launch_cmd = ([[XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s XDG_STATE_HOME=%s XDG_CACHE_HOME=%s NVIM_APPNAME=%s %s --listen 0.0.0.0:%s --headless]])
+      :format(
+        self._remote_xdg_config_path,
+        self._remote_xdg_data_path,
+        self._remote_xdg_state_path,
+        self._remote_xdg_cache_path,
+        remote_nvim.config.remote.app_name,
+        self:_remote_neovim_binary_path(),
+        remote_free_port
+      )
+  local session_info = {
+    unique_host_id = self.unique_host_id,
+    workspace_id = self._remote_workspace_id,
+    local_port = self._local_free_port,
+    remote_port = remote_free_port,
+  }
+
+  self:_run_code_in_coroutine(function()
+    self.executor:new_session(session_info, remote_server_launch_cmd)
+  end, "Spawning Remote Neovim server")
+  self.progress_viewer:add_session_node({
+    type = "info_node",
+    value = ("Remote server available at localhost:%s"):format(self._local_free_port),
+  })
+end
+
+---@private
 ---Launch remote neovim server
 function Provider:_launch_remote_neovim_server()
   if not self:is_remote_server_running() then
@@ -1070,6 +1125,20 @@ function Provider:sync()
         self:start_progress_view_run(("Sync Neovim with remote (Run no. %s)"):format(self._neovim_launch_number))
         self:_setup_workspace_variables(true)
         self:_setup_remote()
+        self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
+      end
+    end,
+    "Syncing up Neovim on remote host")
+end
+
+function Provider:spawn()
+  self:_run_code_in_coroutine(function()
+      self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_host_id))
+      if not self:is_remote_server_running() then
+        self:start_progress_view_run(("Spawn new client"):format(self._neovim_launch_number))
+        self:_setup_workspace_variables()
+        self:_setup_remote()
+        self:_spawn_remote_neovim_server()
         self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
       end
     end,
@@ -1298,6 +1367,18 @@ function Provider:compare_checksums(local_checksum, remote_checksum, compression
   os.remove(tmp_sha)
   self:_handle_job_completion("Compared checksums", section_node)
   return equal
+end
+
+---Start a session depending on opts
+---@param opts remote-nvim.providers.SessionAction
+function Provider:session_action(opts)
+  if opts.session_action == "launch" then
+    self:launch_neovim()
+  elseif opts.session_action == "sync" then
+    self:sync()
+  elseif opts.session_action == "spawn" then
+    self:spawn()
+  end
 end
 
 return Provider
