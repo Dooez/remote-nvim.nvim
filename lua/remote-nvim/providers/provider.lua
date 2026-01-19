@@ -19,6 +19,7 @@
 ---@field data_copy boolean? Flag indicating if the data directories should be copied or not
 ---@field client_auto_start boolean? Flag indicating if the client should be auto started or not
 ---@field offline_mode boolean? Should we operate in offline mode
+---@field last_syncronization string? Date of last syncronization
 ---@field devpod_source_opts remote-nvim.providers.DevpodSourceOpts? Devpod related source options
 
 ---@class remote-nvim.providers.Provider: remote-nvim.Object
@@ -855,6 +856,8 @@ function Provider:_setup_remote()
         end
       end
     end
+    self._host_config.last_syncronization = os.date("%d-%m-%Y %H:%M")
+    self._config_provider:update_workspace_config(self.unique_host_id, self._host_config)
 
     self._setup_running = false
   else
@@ -1122,8 +1125,7 @@ function Provider:sync()
   self:_run_code_in_coroutine(function()
       self.logger.fmt_debug(("[%s][%s] Starting sync with remote"):format(self.provider_type, self.unique_host_id))
       if not self:is_remote_server_running() then
-        self:start_progress_view_run(("Sync Neovim with remote (Run no. %s)"):format(self._neovim_launch_number))
-        self._neovim_launch_number = self._neovim_launch_number + 1
+        self:start_progress_view_run("Sync Neovim with remote")
         self:_setup_workspace_variables(true)
         self:_setup_remote()
         self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
@@ -1137,10 +1139,9 @@ function Provider:spawn()
       self.logger.fmt_debug(("[%s][%s] Spawning new neovim server on remote"):format(self.provider_type,
         self.unique_host_id))
       if not self:is_remote_server_running() then
-        self:start_progress_view_run(("Spawn new client (Run no. %s)"):format(self._neovim_launch_number))
-        self._neovim_launch_number = self._neovim_launch_number + 1
+        self:start_progress_view_run(("Spawn new client"))
         self:_setup_workspace_variables()
-        self:_setup_remote()
+        -- self:_setup_remote()
         self:_spawn_remote_neovim_server()
         self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))
       end

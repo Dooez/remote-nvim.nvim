@@ -34,6 +34,7 @@ local remote_nvim = require("remote-nvim")
 ---@class remote-nvim.ui.ProgressView
 ---@field private progress_view NuiSplit|NuiPopup Progress View UI holder
 ---@field private progress_view_pane_tree NuiTree Tree used to render "Progress View" pane
+---@field private run_counter integer Number of runs started
 ---@field private session_info_pane_tree NuiTree Tree used to render "Session Info" pane
 ---@field private workspaces_pane_tree NuiTree Tree used to render "Workspaces" pane
 ---@field private connections_pane_tree NuiTree Tree used to render "Connections" pane
@@ -57,6 +58,7 @@ local ProgressView = require("remote-nvim.middleclass")("ProgressView")
 function ProgressView:init()
   local progress_view_config = remote_nvim.config.progress_view
   self.layout_type = progress_view_config.type
+  self.run_counter = 0
   self.progress_view_hl_ns = vim.api.nvim_create_namespace("remote_nvim_progressview_ns")
   self.progress_view_buf_options = {
     bufhidden = "hide",
@@ -295,6 +297,7 @@ function ProgressView:start_run(title)
     text = title,
     type = "run_node",
   })
+
   self:_setup_workspaces_pane()
   self:_setup_session_info_pane()
 
@@ -497,6 +500,7 @@ function ProgressView:_initialize_workspaces_tree()
     self.workspaces_pane_tree:add_node(root_node)
     local root_id = root_node:get_id()
     local function add_line(key, value)
+      value = value or "<not-provided>"
       local node = NuiTree.Node({
         key = key,
         value = value,
@@ -508,10 +512,11 @@ function ProgressView:_initialize_workspaces_tree()
       root_node.last_child_id = node:get_id()
     end
     add_line("OS              ", ws_cfg.os)
-    add_line("Neovim version  ", ws_cfg.arch)
     add_line("Connection type ", ws_cfg.provider)
     add_line("Host URI        ", ws_cfg.host)
     add_line("Connection opts ", (ws_cfg.connection_options == "" and "<no-extra-options>" or ws_cfg.connection_options))
+    add_line("Neovim version  ", ws_cfg.neovim_version)
+    add_line("Last sync       ", ws_cfg.last_syncronization)
   end
   local workspaces = workspace_cfg:get_workspace_config()
   for _, ws in pairs(workspaces) do
@@ -757,9 +762,41 @@ function ProgressView:_get_workspaces_keymaps(tree, start_linenr)
         else
           error("Unknown provider type")
         end
+        vim.api.nvim_set_current_win(self.progress_view.winid)
         provider:spawn()
       end,
       desc = "Spawn [N]ew Connection",
+    },
+    {
+      key = "E",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+
+        local devpod_utils = require("remote-nvim.providers.devpod.devpod_utils")
+        ---@type remote-nvim.providers.WorkspaceConfig
+        local ws_cfg = node.workspace_config
+        ---@type remote-nvim.providers.ProviderOpts
+        local opts = {
+          host = ws_cfg.host,
+          provider_type = ws_cfg.provider,
+          conn_opts = { ws_cfg.connection_options },
+          devpod_opts = devpod_utils.get_workspace_devpod_opts(ws_cfg),
+          progress_view = self,
+        }
+        ---@type remote-nvim.providers.Provider
+        local provider
+        if opts.provider_type == "ssh" then
+          provider = require("remote-nvim.providers.ssh.ssh_provider")(opts)
+        elseif opts.provider_type == "devpod" then
+          provider = require("remote-nvim.providers.devpod.devpod_provider")(devpod_utils.get_devpod_provider_opts(opts))
+        else
+          error("Unknown provider type")
+        end
+        vim.api.nvim_set_current_win(self.progress_view.winid)
+        provider:sync()
+      end,
+      desc = "Sync Workspace",
     },
   }
 end
@@ -869,7 +906,10 @@ function ProgressView:_add_progress_view_run_heading(node)
   self.active_progress_view_run_node = NuiTree.Node({
     text = node.text,
     type = node.type,
+    id = node.text .. self.run_counter
   }, {})
+  self.run_counter = self.run_counter + 1
+
   self.progress_view_pane_tree:add_node(self.active_progress_view_run_node)
 
   -- Collapse all nodes, and then expand current run section
