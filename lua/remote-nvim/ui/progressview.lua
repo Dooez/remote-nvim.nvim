@@ -762,7 +762,7 @@ function ProgressView:_get_workspaces_keymaps(tree, start_linenr)
         else
           error("Unknown provider type")
         end
-        vim.api.nvim_set_current_win(self.progress_view.winid)
+        self:_set_buffer(self.progress_view.bufnr)
         provider:spawn()
       end,
       desc = "Spawn [N]ew Connection",
@@ -793,7 +793,7 @@ function ProgressView:_get_workspaces_keymaps(tree, start_linenr)
         else
           error("Unknown provider type")
         end
-        vim.api.nvim_set_current_win(self.progress_view.winid)
+        self:_set_buffer(self.progress_view.bufnr)
         provider:sync()
       end,
       desc = "Sync Workspace",

@@ -10,6 +10,7 @@
 ---@field os os_type? OS running on the remote host
 ---@field arch string? Arch of the remote host
 ---@field host string? Host name to whom the workspace belongs
+---@field host_id string? Host id name to whom the workspace belongs
 ---@field neovim_version string? Version of Neovim running on the remote
 ---@field connection_options string? Connection options needed to connect to the remote host
 ---@field remote_neovim_home string? Path on remote host where remote-neovim installs/configures things
@@ -1141,7 +1142,7 @@ function Provider:spawn()
       if not self:is_remote_server_running() then
         self:start_progress_view_run(("Spawn new client"))
         self:_setup_workspace_variables()
-        -- self:_setup_remote()
+        self:_setup_remote()
         self:_spawn_remote_neovim_server()
         self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))
       end
