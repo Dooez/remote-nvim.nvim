@@ -66,6 +66,10 @@ function M.RemoteSync(opts)
   end
 end
 
+vim.api.nvim_create_user_command("RemoteShow", function()
+  require("remote-nvim.ui.progressview")():show()
+end, { desc = "Show Remote Status", })
+
 vim.api.nvim_create_user_command("RemoteSync", M.RemoteSync, {
   nargs = "?",
   desc = "Sync Neovim config with the remote machine",

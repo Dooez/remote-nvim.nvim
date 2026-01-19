@@ -52,8 +52,8 @@ local remote_nvim = require("remote-nvim")
 ---@field private progress_view_buf_options table<string, any> Buffer options for Progress View
 ---@field private progress_view_win_options table<string, any> Window options for Progress View
 ---@field private section_deque_map table<string, remote-nvim.structs.Deque> Deque to handle too much output
-local ProgressView = require("remote-nvim.middleclass")("ProgressView")
 
+local ProgressView = require("remote-nvim.middleclass")("ProgressView")
 function ProgressView:init()
   local progress_view_config = remote_nvim.config.progress_view
   self.layout_type = progress_view_config.type
@@ -295,6 +295,7 @@ function ProgressView:start_run(title)
     text = title,
     type = "run_node",
   })
+  self:_setup_workspaces_pane()
   self:_setup_session_info_pane()
 
   return run_node
