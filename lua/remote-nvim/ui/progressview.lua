@@ -1,4 +1,5 @@
 local event = require("nui.utils.autocmd").event
+local workspace_cfg = require("remote-nvim.config")()
 local Deque = require("remote-nvim.structs.deque")
 local NuiLine = require("nui.line")
 local NuiTree = require("nui.tree")
@@ -10,6 +11,7 @@ local remote_nvim = require("remote-nvim")
 
 ---@alias progress_view_node_type "run_node"|"section_node"|"command_node"|"stdout_node"
 ---@alias session_node_type "local_node"|"remote_node"|"config_node"|"root_node"|"info_node"
+---@alias workspaces_node_type "root_node"|"ws_node"|"ws_info_node"
 ---@alias progress_view_status "running"|"success"|"failed"|"no_op"
 
 ---@class remote-nvim.ui.ProgressView.Keymaps: vim.api.keyset.keymap
@@ -33,10 +35,14 @@ local remote_nvim = require("remote-nvim")
 ---@field private progress_view NuiSplit|NuiPopup Progress View UI holder
 ---@field private progress_view_pane_tree NuiTree Tree used to render "Progress View" pane
 ---@field private session_info_pane_tree NuiTree Tree used to render "Session Info" pane
+---@field private workspaces_pane_tree NuiTree Tree used to render "Workspaces" pane
+---@field private connections_pane_tree NuiTree Tree used to render "Connections" pane
 ---@field private layout_type "split"|"popup" Type of layout we are using for progress view
 ---@field private progress_view_keymap_options vim.api.keyset.keymap Default keymap options
 ---@field private help_pane_bufnr integer Buffer ID of the keymap help buffer
 ---@field private session_info_pane_bufnr integer Buffer ID of the session info buffer
+---@field private workspaces_pane_bufnr integer Buffer ID of the workspaces buffer
+---@field private connections_pane_bufnr integer Buffer ID of the connections buffer
 ---@field private progress_view_options nui_popup_options|nui_split_options
 ---@field private active_progress_view_section_node NuiTree.Node?
 ---@field private active_progress_view_run_node NuiTree.Node?
@@ -105,8 +111,12 @@ function ProgressView:init()
   end
   self.help_pane_bufnr = vim.api.nvim_create_buf(false, true)
   self.session_info_pane_bufnr = vim.api.nvim_create_buf(false, true)
+  self.workspaces_pane_bufnr = vim.api.nvim_create_buf(false, true)
+  self.connections_pane_bufnr = vim.api.nvim_create_buf(false, true)
   self.progress_view_pane_tree = nil
   self.session_info_pane_tree = nil
+  self.workspaces_pane_tree = nil
+  self.connections_pane_tree = nil
   self.active_progress_view_section_node = nil
   self.progress_view_keymap_options = { noremap = true, nowait = true }
   self.section_deque_map = {}
@@ -114,6 +124,7 @@ function ProgressView:init()
 
   self:_setup_progress_view_pane()
   self:_setup_session_info_pane()
+  self:_setup_workspaces_pane()
   self:_setup_help_pane()
 end
 
@@ -162,6 +173,8 @@ function ProgressView:_set_top_line(bufnr)
   local help_hl = (bufnr == self.help_pane_bufnr) and active_hl or inactive_hl
   local progress_hl = (bufnr == self.progress_view.bufnr) and active_hl or inactive_hl
   local si_hl = (bufnr == self.session_info_pane_bufnr) and active_hl or inactive_hl
+  local workspaces_hl = (bufnr == self.workspaces_pane_bufnr) and active_hl or inactive_hl
+  local conn_hl = (bufnr == self.connections_pane_bufnr) and active_hl or inactive_hl
 
   vim.api.nvim_buf_set_lines(bufnr, 0, vim.api.nvim_buf_line_count(bufnr) - 1, true, {})
   vim.api.nvim_buf_set_lines(bufnr, 0, 0, true, { "" })
@@ -172,6 +185,10 @@ function ProgressView:_set_top_line(bufnr)
   line:append(" Progress View (P) ", progress_hl)
   line:append(" ")
   line:append(" Session Info (S) ", si_hl)
+  line:append(" ")
+  line:append(" Workspaces (W) ", workspaces_hl)
+  line:append(" ")
+  line:append(" Connections (C) ", conn_hl)
   line:append(" ")
   line:append(" Help (?) ", help_hl)
   line:render(bufnr, -1, line_count)
@@ -382,9 +399,9 @@ function ProgressView:_initialize_session_info_tree()
       end
 
       if
-        (parent_node and parent_node.last_child_id == node:get_id())
-        or (node.holds == "remote_node" and not node:is_expanded())
-        or (node.type == "root_node" and node:is_expanded())
+          (parent_node and parent_node.last_child_id == node:get_id())
+          or (node.holds == "remote_node" and not node:is_expanded())
+          or (node.type == "root_node" and node:is_expanded())
       then
         return {
           line,
@@ -433,6 +450,96 @@ function ProgressView:_setup_session_info_pane()
   end
 
   self.session_info_pane_tree:render(self.session_info_tree_render_linenr)
+end
+
+---@private
+---Initialize session tree
+function ProgressView:_initialize_workspaces_tree()
+  self.workspaces_pane_tree = NuiTree({
+    ns_id = self.progress_view_hl_ns,
+    winid = self.progress_view.winid,
+    bufnr = self.workspaces_pane_bufnr,
+    prepare_node = function(node, parent_node)
+      local line = NuiLine()
+
+      line:append(string.rep(" ", node:get_depth()))
+
+      ---@type workspaces_node_type
+      local node_type = node.type
+
+      if node_type == "root_node" then
+        line:append((node:is_expanded() and " " or " ") .. node.key .. ": ", hl_groups.RemoteNvimHeading.name)
+      else
+        line:append(" ")
+        line:append(node.key .. ": ", hl_groups.RemoteNvimInfoKey.name)
+      end
+      line:append(node.value or "<not-provided>", hl_groups.RemoteNvimInfoValue.name)
+
+      if parent_node and parent_node.last_child_id == node:get_id() then
+        return {
+          line,
+          NuiLine(),
+        }
+      end
+      return line
+    end,
+  })
+
+  ---@param ws_cfg remote-nvim.providers.WorkspaceConfig
+  local add_worspace_node = function(ws_cfg)
+    local root_node = NuiTree.Node({
+      key = ws_cfg.workspace_id,
+      value = ws_cfg.host,
+      type = "root_node",
+      workspace_config = ws_cfg,
+    })
+    self.workspaces_pane_tree:add_node(root_node)
+    local root_id = root_node:get_id()
+    local function add_line(key, value)
+      local node = NuiTree.Node({
+        key = key,
+        value = value,
+        type = "ws_node",
+        parent_node = root_node,
+        workspace_config = ws_cfg,
+      })
+      self.workspaces_pane_tree:add_node(node, root_id)
+      root_node.last_child_id = node:get_id()
+    end
+    add_line("OS              ", ws_cfg.os)
+    add_line("Neovim version  ", ws_cfg.arch)
+    add_line("Connection type ", ws_cfg.provider)
+    add_line("Host URI        ", ws_cfg.host)
+    add_line("Connection opts ", (ws_cfg.connection_options == "" and "<no-extra-options>" or ws_cfg.connection_options))
+  end
+  local workspaces = workspace_cfg:get_workspace_config()
+  for _, ws in pairs(workspaces) do
+    add_worspace_node(ws)
+  end
+end
+
+---@private
+---Set up "Workspaces" pane
+function ProgressView:_setup_workspaces_pane()
+  self:_set_top_line(self.workspaces_pane_bufnr)
+  self.workspaces_tree_render_linenr = vim.api.nvim_buf_line_count(self.workspaces_pane_bufnr) + 1
+  self:_initialize_workspaces_tree()
+
+  -- Set up key bindings
+  local keymaps = self:_get_progressview_keymaps()
+  local tree_keymaps = self:_get_tree_keymaps(self.workspaces_pane_tree, self.workspaces_tree_render_linenr)
+  local ws_keymaps = self:_get_workspaces_keymaps(self.workspaces_pane_tree, self.workspaces_tree_render_linenr)
+  keymaps = vim.list_extend(keymaps, tree_keymaps)
+  keymaps = vim.list_extend(keymaps, ws_keymaps)
+  self:_set_buffer_keymaps(self.workspaces_pane_bufnr, keymaps)
+
+  for key, val in pairs(self.progress_view_buf_options) do
+    vim.api.nvim_set_option_value(key, val, {
+      buf = self.workspaces_pane_bufnr,
+    })
+  end
+
+  self.workspaces_pane_tree:render(self.workspaces_tree_render_linenr)
 end
 
 ---@private
@@ -581,11 +688,25 @@ function ProgressView:_get_progressview_keymaps()
       desc = "Switch to Session Info view",
     },
     {
+      key = "W",
+      action = function()
+        self:_set_buffer(self.workspaces_pane_bufnr)
+      end,
+      desc = "Switch to Workspaces view",
+    },
+    {
+      key = "C",
+      action = function()
+        self:_set_buffer(self.connections_pane_bufnr)
+      end,
+      desc = "Switch to Connections view",
+    },
+    {
       key = "?",
       action = function()
         local switch_to_bufnr = (vim.api.nvim_win_get_buf(self.progress_view.winid) == self.help_pane_bufnr)
             and self.progress_view.bufnr
-          or self.help_pane_bufnr
+            or self.help_pane_bufnr
         self:_set_buffer(switch_to_bufnr)
       end,
       desc = "Toggle help window",
@@ -596,6 +717,48 @@ function ProgressView:_get_progressview_keymaps()
         self:hide()
       end,
       desc = "Close Progress view",
+    },
+  }
+end
+
+---@private
+---@param tree NuiTree Tree on which keymaps will be set
+---@param start_linenr number What line number on the buffer should the tree be rendered from
+---@return remote-nvim.ui.ProgressView.Keymaps[]
+function ProgressView:_get_workspaces_keymaps(tree, start_linenr)
+  if tree == nil or start_linenr == nil then
+    return {}
+  end
+  return {
+    {
+      key = "N",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+
+        local devpod_utils = require("remote-nvim.providers.devpod.devpod_utils")
+        ---@type remote-nvim.providers.WorkspaceConfig
+        local ws_cfg = node.workspace_config
+        ---@type remote-nvim.providers.ProviderOpts
+        local opts = {
+          host = ws_cfg.host,
+          provider_type = ws_cfg.provider,
+          conn_opts = { ws_cfg.connection_options },
+          devpod_opts = devpod_utils.get_workspace_devpod_opts(ws_cfg),
+          progress_view = self,
+        }
+        ---@type remote-nvim.providers.Provider
+        local provider
+        if opts.provider_type == "ssh" then
+          provider = require("remote-nvim.providers.ssh.ssh_provider")(opts)
+        elseif opts.provider_type == "devpod" then
+          provider = require("remote-nvim.providers.devpod.devpod_provider")(devpod_utils.get_devpod_provider_opts(opts))
+        else
+          error("Unknown provider type")
+        end
+        provider:spawn()
+      end,
+      desc = "Spawn [N]ew Connection",
     },
   }
 end
