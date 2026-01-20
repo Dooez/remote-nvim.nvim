@@ -12,6 +12,7 @@ local remote_nvim = require("remote-nvim")
 ---@alias progress_view_node_type "run_node"|"section_node"|"command_node"|"stdout_node"
 ---@alias session_node_type "local_node"|"remote_node"|"config_node"|"root_node"|"info_node"
 ---@alias workspaces_node_type "root_node"|"ws_node"|"ws_info_node"
+---@alias connections_node_type "root_node"|"conn_node"|"conn_info_node"
 ---@alias progress_view_status "running"|"success"|"failed"|"no_op"
 
 ---@class remote-nvim.ui.ProgressView.Keymaps: vim.api.keyset.keymap
@@ -127,6 +128,7 @@ function ProgressView:init()
   self:_setup_progress_view_pane()
   self:_setup_session_info_pane()
   self:_setup_workspaces_pane()
+  self:_setup_connections_pane()
   self:_setup_help_pane()
 end
 
@@ -299,6 +301,7 @@ function ProgressView:start_run(title)
   })
 
   self:_setup_workspaces_pane()
+  self:_setup_connections_pane()
   self:_setup_session_info_pane()
 
   return run_node
@@ -516,7 +519,7 @@ function ProgressView:_initialize_workspaces_tree()
     add_line("Host URI        ", ws_cfg.host)
     add_line("Connection opts ", (ws_cfg.connection_options == "" and "<no-extra-options>" or ws_cfg.connection_options))
     add_line("Neovim version  ", ws_cfg.neovim_version)
-    add_line("Last sync       ", ws_cfg.last_syncronization)
+    add_line("Last sync       ", ws_cfg.last_sync)
   end
   local workspaces = workspace_cfg:get_workspace_config()
   for _, ws in pairs(workspaces) do
@@ -546,6 +549,94 @@ function ProgressView:_setup_workspaces_pane()
   end
 
   self.workspaces_pane_tree:render(self.workspaces_tree_render_linenr)
+end
+
+---@private
+---Initialize session tree
+function ProgressView:_initialize_connections_tree()
+  self.connections_pane_tree = NuiTree({
+    ns_id = self.progress_view_hl_ns,
+    winid = self.progress_view.winid,
+    bufnr = self.connections_pane_bufnr,
+    prepare_node = function(node, parent_node)
+      local line = NuiLine()
+
+      line:append(string.rep(" ", node:get_depth()))
+
+      ---@type connections_node_type
+      local node_type = node.type
+
+      if node_type == "root_node" then
+        line:append((node:is_expanded() and " " or " ") .. node.key .. ": ", hl_groups.RemoteNvimHeading.name)
+      else
+        line:append(" ")
+        line:append(node.key .. ": ", hl_groups.RemoteNvimInfoKey.name)
+      end
+      line:append(node.value or "<not-provided>", hl_groups.RemoteNvimInfoValue.name)
+
+      if parent_node and parent_node.last_child_id == node:get_id() then
+        return {
+          line,
+          NuiLine(),
+        }
+      end
+      return line
+    end,
+  })
+
+  ---@param conn_inf remote-nvim.providers.Connections.ConnectionInfo
+  local add_connection_node = function(conn_inf)
+    local root_node = NuiTree.Node({
+      key = conn_inf.connection_id,
+      value = conn_inf.workspace.host,
+      type = "root_node",
+      connection = conn_inf,
+    })
+    self.connections_pane_tree:add_node(root_node)
+    local root_id = root_node:get_id()
+    local function add_line(key, value)
+      value = value or "<not-provided>"
+      local node = NuiTree.Node({
+        key = key,
+        value = value,
+        type = "conn_node",
+        parent_node = root_node,
+        connection = conn_inf,
+      })
+      self.connections_pane_tree:add_node(node, root_id)
+      root_node.last_child_id = node:get_id()
+    end
+    add_line("Connection type ", conn_inf.workspace.provider)
+    add_line("Started         ", conn_inf.started)
+  end
+  local ssh_conn = require("remote-nvim.providers.ssh.ssh_connections")()
+  for _, ws in pairs(ssh_conn:update_connections()) do
+    add_connection_node(ws)
+  end
+end
+
+---@private
+---Set up "connections" pane
+function ProgressView:_setup_connections_pane()
+  self:_set_top_line(self.connections_pane_bufnr)
+  self.connections_tree_render_linenr = vim.api.nvim_buf_line_count(self.connections_pane_bufnr) + 1
+  self:_initialize_connections_tree()
+
+  -- Set up key bindings
+  local keymaps = self:_get_progressview_keymaps()
+  local tree_keymaps = self:_get_tree_keymaps(self.connections_pane_tree, self.connections_tree_render_linenr)
+  local conn_keymaps = self:_get_connections_keymaps(self.connections_pane_tree, self.connections_tree_render_linenr)
+  keymaps = vim.list_extend(keymaps, tree_keymaps)
+  keymaps = vim.list_extend(keymaps, conn_keymaps)
+  self:_set_buffer_keymaps(self.connections_pane_bufnr, keymaps)
+
+  for key, val in pairs(self.progress_view_buf_options) do
+    vim.api.nvim_set_option_value(key, val, {
+      buf = self.connections_pane_bufnr,
+    })
+  end
+
+  self.connections_pane_tree:render(self.connections_tree_render_linenr)
 end
 
 ---@private
@@ -697,6 +788,7 @@ function ProgressView:_get_progressview_keymaps()
       key = "W",
       action = function()
         self:_set_buffer(self.workspaces_pane_bufnr)
+        self:_setup_workspaces_pane()
       end,
       desc = "Switch to Workspaces view",
     },
@@ -704,6 +796,7 @@ function ProgressView:_get_progressview_keymaps()
       key = "C",
       action = function()
         self:_set_buffer(self.connections_pane_bufnr)
+        self:_setup_connections_pane()
       end,
       desc = "Switch to Connections view",
     },
@@ -797,6 +890,44 @@ function ProgressView:_get_workspaces_keymaps(tree, start_linenr)
         provider:sync()
       end,
       desc = "Sync Workspace",
+    },
+  }
+end
+
+---@private
+---@param tree NuiTree Tree on which keymaps will be set
+---@param start_linenr number What line number on the buffer should the tree be rendered from
+---@return remote-nvim.ui.ProgressView.Keymaps[]
+function ProgressView:_get_connections_keymaps(tree, start_linenr)
+  if tree == nil or start_linenr == nil then
+    return {}
+  end
+  return {
+    {
+      key = "Y",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+        ---@type remote-nvim.providers.Connections.ConnectionInfo
+        local info = node.connection
+        local launch_cmd = "nvim --remote-ui --server localhost:" .. info.local_port
+        vim.fn.setreg("+", launch_cmd)
+        vim.notify(("Yanked `%s`"):format(launch_cmd), vim.log.levels.INFO)
+      end,
+      desc = "[Y]ank Connection String",
+    },
+    {
+      key = "K",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+        ---@type remote-nvim.providers.Connections.ConnectionInfo
+        local info = node.connection
+        local ssh_conn = require("remote-nvim.providers.ssh.ssh_connections")()
+        ssh_conn:close_connections(info.connection_id)
+        self:_setup_connections_pane()
+      end,
+      desc = "[K]ill the connection",
     },
   }
 end

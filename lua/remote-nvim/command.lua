@@ -135,13 +135,14 @@ vim.api.nvim_create_user_command("RemoteSpawn", M.RemoteSpawn, {
 })
 
 vim.api.nvim_create_user_command("RemoteKillAll", function()
-  local ssh = require("remote-nvim.providers.ssh.ssh_executor")
-  local sessions = ssh.update_sessions()
-  local session_ids = {}
-  for id, _ in pairs(sessions) do
-    table.insert(session_ids, id)
+  local ssh_executor    = require("remote-nvim.providers.ssh.ssh_executor")()
+  local ssh_connections = require("remote-nvim.providers.ssh.ssh_connections")({ executor = ssh_executor })
+  local connections     = ssh_connections:update_connections()
+  local connection_ids  = {}
+  for id, _ in pairs(connections) do
+    table.insert(connection_ids, id)
   end
-  ssh.close_sessions(session_ids)
+  ssh_connections:close_connections(connection_ids)
 end, {
   nargs = 0,
   desc = "Kill all spawned sessions",
