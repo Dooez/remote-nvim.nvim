@@ -917,6 +917,17 @@ function ProgressView:_get_connections_keymaps(tree, start_linenr)
       desc = "[Y]ank Connection String",
     },
     {
+      key = "L",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+        ---@type remote-nvim.providers.Connections.ConnectionInfo
+        local info = node.connection
+        remote_nvim.config.client_callback(info.local_port, info.workspace)
+      end,
+      desc = "[L]aunch new local client",
+    },
+    {
       key = "K",
       action = function()
         local node = tree:get_node()
