@@ -3,6 +3,7 @@ local Path = require("plenary.path")
 local ScanDir = require("plenary.scandir")
 local const = require("remote-nvim.constants")
 local utils = require("remote-nvim.utils")
+local remote_nvim = require("remote-nvim")
 
 ---@class remote-nvim.providers.ssh.SSHConnections: remote-nvim.providers.Connections
 ---@field super remote-nvim.providers.Connections
@@ -14,8 +15,7 @@ local SSHConnections = Connections:subclass("SSHConnections")
 function SSHConnections:init(opts)
   SSHConnections.super.init(self, opts)
 
-  local remote_neovim = require("remote-nvim")
-  self.ssh_binary = remote_neovim.config.ssh_config.ssh_binary
+  self.ssh_binary = remote_nvim.config.ssh_config.ssh_binary
 
   self._connections_path = Path:new({ vim.fn.stdpath("data"), const.PLUGIN_NAME, "ssh_connections.json" })
   self._connections_path:touch({ mode = 493, parents = true }) -- Ensure that the path exists
@@ -147,7 +147,7 @@ function SSHConnections:new_connection(connection_info, cmd, executor, extra_opt
   end
   uv.unref(handle)
 
-  connection_info.started = os.date("%d-%m-%Y %H:%M")
+  connection_info.started = os.date(remote_nvim.config.ui.connection_start_date_format)
   conns[connection_info.connection_id] = connection_info
   self:_save_connections(conns)
 

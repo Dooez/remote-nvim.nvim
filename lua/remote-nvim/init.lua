@@ -77,6 +77,10 @@ local utils = require("remote-nvim.utils")
 ---@field copy_dirs remote-nvim.config.PluginConfig.Remote.CopyDirs Which directories should be copied over to the remote
 ---@field app_name string Neovim app name which should be used throughout
 
+---@class remote-nvim.config.PluginConfig.UiConfig
+---@field last_sync_date_format string Date format for last sync
+---@field connection_start_date_format string Date format for start time of a connection
+
 ---@class remote-nvim.config.PluginConfig
 ---@field devpod remote-nvim.config.PluginConfig.DevpodConfig Devcontainer configuration
 ---@field ssh_config remote-nvim.config.PluginConfig.SSHConfig SSH configuration
@@ -89,6 +93,7 @@ local utils = require("remote-nvim.utils")
 ---@field client_callback function<string, remote-nvim.providers.WorkspaceConfig> Function that would be called upon to start a Neovim client
 ---@field offline_mode remote-nvim.config.PluginConfig.OfflineModeConfig Offline mode configuration
 ---@field log remote-nvim.config.PluginConfig.LogConfig Plugin logging options
+---@field ui remote-nvim.config.PluginConfig.UiConfig Plugin ui options
 
 M.default_opts = {
   devpod = {
@@ -217,6 +222,10 @@ M.default_opts = {
     level = "info",
     max_size = 1024 * 1024 * 2, -- 2MB
   },
+  ui = {
+    last_sync_date_format = "%d-%m-%Y %H:%M",
+    connection_start_date_format = "%d-%m-%Y %H:%M",
+  }
 }
 
 ---Setup for the plugin

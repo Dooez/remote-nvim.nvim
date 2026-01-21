@@ -858,7 +858,7 @@ function Provider:_setup_remote()
         end
       end
     end
-    self._host_ws_config.last_sync = os.date("%d-%m-%Y %H:%M")
+    self._host_ws_config.last_sync = os.date(remote_nvim.config.ui.last_sync_date_format)
     self._config_provider:update_workspace_config(self.unique_host_id, self._host_ws_config)
 
     self._setup_running = false
