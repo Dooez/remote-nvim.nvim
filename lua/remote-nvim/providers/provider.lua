@@ -70,6 +70,7 @@
 ---@class remote-nvim.providers.SessionAction
 ---@field session_action session_action_type type of action to perform
 
+---@class remote-nvim.providers.Provider
 local Provider = require("remote-nvim.middleclass")("Provider")
 
 local Executor = require("remote-nvim.providers.executor")
@@ -284,51 +285,50 @@ function Provider:_setup_workspace_variables(sync)
   self._remote_neovim_config_path =
       utils.path_join(self._remote_is_windows, self._remote_xdg_config_path, remote_nvim.config.remote.app_name)
 
-  self:_add_session_info()
+  -- self:_add_session_info()
 end
 
----@private
----Add session information to the progress viewer
-function Provider:_add_session_info()
-  local function add_config_info(key, value)
-    self.progress_viewer:add_session_node({
-      type = "config_node",
-      key = key,
-      value = value,
-    })
-  end
-
-  local function add_local_info(key, value)
-    self.progress_viewer:add_session_node({
-      type = "local_node",
-      key = key,
-      value = value,
-    })
-  end
-
-  local function add_remote_info(key, value)
-    self.progress_viewer:add_session_node({
-      type = "remote_node",
-      key = key,
-      value = value,
-    })
-  end
-
-  add_config_info("Log path         ", remote_nvim.config.log.filepath)
-  add_config_info("Host ID          ", self.unique_host_id)
-  add_config_info("Version (Commit) ", utils.get_plugin_version())
-
-  add_local_info("OS             ", utils.os_name())
-  add_local_info("Neovim version ", utils.neovim_version())
-
-  add_remote_info("OS              ", self._remote_os)
-  add_remote_info("Neovim version  ", self._remote_neovim_version)
-  add_remote_info("Connection type ", self.provider_type)
-  add_remote_info("Host URI        ", self.host)
-  add_remote_info("Connection opts ", (self.conn_opts == "" and "<no-extra-options>" or self.conn_opts))
-  add_remote_info("Workspace path  ", self._remote_workspace_id_path)
-  add_remote_info("Working dir.    ", self._remote_working_dir)
-end
+-- ---@private Add session information to the progress viewer
+-- function Provider:_add_session_info()
+--   local function add_config_info(key, value)
+--     self.progress_viewer:add_session_node({
+--       type = "config_node",
+--       key = key,
+--       value = value,
+--     })
+--   end
+--
+--   local function add_local_info(key, value)
+--     self.progress_viewer:add_session_node({
+--       type = "local_node",
+--       key = key,
+--       value = value,
+--     })
+--   end
+--
+--   local function add_remote_info(key, value)
+--     self.progress_viewer:add_session_node({
+--       type = "remote_node",
+--       key = key,
+--       value = value,
+--     })
+--   end
+--
+--   add_config_info("Log path         ", remote_nvim.config.log.filepath)
+--   add_config_info("Host ID          ", self.unique_host_id)
+--   add_config_info("Version (Commit) ", utils.get_plugin_version())
+--
+--   add_local_info("OS             ", utils.os_name())
+--   add_local_info("Neovim version ", utils.neovim_version())
+--
+--   add_remote_info("OS              ", self._remote_os)
+--   add_remote_info("Neovim version  ", self._remote_neovim_version)
+--   add_remote_info("Connection type ", self.provider_type)
+--   add_remote_info("Host URI        ", self.host)
+--   add_remote_info("Connection opts ", (self.conn_opts == "" and "<no-extra-options>" or self.conn_opts))
+--   add_remote_info("Workspace path  ", self._remote_workspace_id_path)
+--   add_remote_info("Working dir.    ", self._remote_working_dir)
+-- end
 
 ---@private
 ---Reset provider state
@@ -343,20 +343,7 @@ end
 ---@title string Title for the run
 function Provider:start_progress_view_run(title)
   self.progress_viewer:start_run(title)
-  self:show_progress_view_window()
-end
-
----Show progress info window
-function Provider:show_progress_view_window()
-  for _, session in pairs(remote_nvim.session_provider:get_all_sessions()) do
-    session:hide_progress_view_window()
-  end
-  self.progress_viewer:show()
-end
-
----Hide progress info window
-function Provider:hide_progress_view_window()
-  self.progress_viewer:hide()
+  remote_nvim.dashboard:show()
 end
 
 ---Generate host identifer using host and port on host
@@ -423,7 +410,7 @@ end
 ---@return string selected_choice Selected choice
 function Provider:get_selection(choices, selection_opts)
   local section_node = vim.schedule(function()
-    return self.progress_viewer:add_progress_node({
+    self.progress_viewer:add_progress_node({
       type = "section_node",
       text = ("Choice: %s"):format(selection_opts.prompt),
     })
@@ -458,7 +445,7 @@ end
 
 ---@private
 ---Get user preference about workspace id
----@return str? worksapce_id Should the config be copied over
+---@return string? worksapce_id Should the config be copied over
 function Provider:_get_neovim_workspace_id_preference()
   local choice = self:get_selection({ "Yes", "No" }, {
     prompt = "Provide user-defined workspace id? ",
@@ -674,7 +661,6 @@ end
 
 ---@private
 ---Setup remote
----@param sync boolean Should update all settings
 function Provider:_setup_remote()
   if not self._setup_running then
     self._setup_running = true
@@ -978,7 +964,7 @@ function Provider:_launch_remote_neovim_server()
             local success_code = (exit_code == 0 or self._provider_stopped_neovim)
             self.progress_viewer:update_status(success_code and "success" or "failed", true, node)
             if not success_code then
-              self:show_progress_view_window()
+              remote_nvim.dashboard:show()
             end
 
             if not self._provider_stopped_neovim then
@@ -993,10 +979,11 @@ function Provider:_launch_remote_neovim_server()
     end, "Launching Remote Neovim server")
     self._remote_server_process_id = self.executor:last_job_id()
     if self:is_remote_server_running() then
-      self.progress_viewer:add_session_node({
-        type = "info_node",
-        value = ("Remote server available at localhost:%s"):format(self._local_free_port),
-      })
+      --TODO: save as bound connection
+      -- self.progress_viewer:add_session_node({
+      --   type = "info_node",
+      --   value = ("Remote server available at localhost:%s"):format(self._local_free_port),
+      -- })
     end
   end
 end
@@ -1103,8 +1090,8 @@ function Provider:_launch_local_neovim_client()
       self._config_provider:get_workspace_config(self.unique_host_id)
     )
   else
-    self:show_progress_view_window()
-    self.progress_viewer:switch_to_pane("session_info", true)
+    remote_nvim.dashboard:show()
+    -- self.progress_viewer:switch_to_pane("session_info", true) TODO: switch to pane
   end
 end
 
@@ -1202,10 +1189,8 @@ function Provider:_cleanup_remote_host()
   local exit_cb = function(node)
     return function(exit_code)
       self.progress_viewer:update_status(exit_code == 0 and "success" or "failed", true, node)
-      if exit_code == 0 then
-        self:hide_progress_view_window()
-      else
-        self:show_progress_view_window()
+      if exit_code ~= 0 then
+        remote_nvim.dashboard:show()
       end
       self:_reset()
     end
@@ -1229,7 +1214,6 @@ function Provider:_cleanup_remote_host()
   vim.notify(("Cleanup on remote host '%s' completed"):format(self.host), vim.log.levels.INFO)
 
   self._config_provider:remove_workspace_config(self.unique_host_id)
-  self:hide_progress_view_window()
 end
 
 ---@private

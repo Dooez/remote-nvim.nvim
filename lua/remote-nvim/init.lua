@@ -3,6 +3,7 @@
 ---@field config remote-nvim.config.PluginConfig Plugin configuration
 ---@field session_provider remote-nvim.providers.SessionProvider Session provider for each unique host
 ---@field setup fun(opts: remote-nvim.config.PluginConfig) Setup the plugin
+---@field dashboard remove-nvim.ui.Dashboard
 local M = {}
 
 local constants = require("remote-nvim.constants")
@@ -244,6 +245,7 @@ M.setup = function(opts)
       require("remote-nvim.deprecation").handle_deprecations(vim.tbl_deep_extend("force", M.default_opts, opts or {}))
 
   M.session_provider = require("remote-nvim.providers.session_provider")()
+  M.dashboard = require("remote-nvim.ui.dashboard")
   require("remote-nvim.command")
   require("remote-nvim.colors").setup()
 

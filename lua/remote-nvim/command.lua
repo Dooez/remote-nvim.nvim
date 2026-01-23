@@ -67,7 +67,7 @@ function M.RemoteSync(opts)
 end
 
 vim.api.nvim_create_user_command("RemoteShow", function()
-  require("remote-nvim.ui.progressview")():show()
+  require("remote-nvim.ui.dashboard"):show()
 end, { desc = "Show Remote Status", })
 
 vim.api.nvim_create_user_command("RemoteSync", M.RemoteSync, {
