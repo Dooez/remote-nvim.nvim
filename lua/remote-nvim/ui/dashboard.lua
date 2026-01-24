@@ -463,8 +463,9 @@ function Dashboard:_initialize_connections_tree()
       self.connections_pane_tree:add_node(node, root_id)
       root_node.last_child_id = node:get_id()
     end
-    add_line("Connection type ", conn_inf.workspace.provider)
-    add_line("Started         ", conn_inf.started)
+    add_line("Connection type ", conn_inf.workspace.provider .. (conn_inf.persistent and "" or " ()"))
+    add_line("Local port      ", conn_inf.local_port)
+    add_line("Started         ", conn_inf.started_time)
   end
   local ssh_conn = require("remote-nvim.providers.ssh.ssh_connections")()
   for _, ws in pairs(ssh_conn:update_connections()) do

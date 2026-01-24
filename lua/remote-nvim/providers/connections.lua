@@ -5,11 +5,14 @@
 ---@field cwd? string CWD of neovim instance
 ---@field local_port string
 ---@field workspace remote-nvim.providers.WorkspaceConfig
----@field started string time of start
+---@field started_time? string time of start
+---@field persistent boolean Is the connection not bound to the current neovim session
 
 ---@class remote-nvim.providers.Connections: remote-nvim.Object
 ---@field private _connections table<string, remote-nvim.providers.Provider> Map of host and associated session
 ---@field private remote_workspaces_config remote-nvim.ConfigProvider
+
+---@class remote-nvim.providers.Connections
 local Connections = require("remote-nvim.middleclass")("Connections")
 
 ---Initialize session provider

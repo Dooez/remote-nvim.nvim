@@ -855,7 +855,8 @@ end
 
 ---@private
 ---Spawn remote server
-function Provider:_spawn_remote_neovim_server()
+---@param persistent boolean
+function Provider:_spawn_remote_neovim_server(persistent)
   -- Find free port on remote
   local free_port_on_remote_cmd = ("%s -l %s"):format(
     self:_remote_neovim_binary_path(),
@@ -896,7 +897,8 @@ function Provider:_spawn_remote_neovim_server()
     unique_host_id = self.unique_host_id,
     workspace_id = self._remote_workspace_id,
     local_port = self._local_free_port,
-    workspace = self._host_ws_config
+    workspace = self._host_ws_config,
+    persistent = persistent,
   }
   self:_run_code_in_coroutine(function()
     self.connections:new_connection(connection_info, remote_server_launch_cmd, self.executor, port_forward_opts)
@@ -916,77 +918,77 @@ end
 
 ---@private
 ---Launch remote neovim server
-function Provider:_launch_remote_neovim_server()
-  if not self:is_remote_server_running() then
-    -- Find free port on remote
-    local free_port_on_remote_cmd = ("%s -l %s"):format(
-      self:_remote_neovim_binary_path(),
-      utils.path_join(self._remote_is_windows, self._remote_scripts_path, "free_port_finder.lua")
-    )
-    self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
-    local remote_free_port_output = self.executor:job_stdout()
-    local remote_free_port = remote_free_port_output[#remote_free_port_output]
-    self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_host_id, remote_free_port)
-
-    self._local_free_port = provider_utils.find_free_port()
-    self.logger.fmt_debug(
-      "[%s][%s] Local free port: %s",
-      self.provider_type,
-      self.unique_host_id,
-      self._local_free_port
-    )
-
-    -- Launch Neovim server and port forward
-    local port_forward_opts = ([[-t -L %s:localhost:%s]]):format(self._local_free_port, remote_free_port)
-    local remote_server_launch_cmd = ([[XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s XDG_STATE_HOME=%s XDG_CACHE_HOME=%s NVIM_APPNAME=%s %s --listen 0.0.0.0:%s --headless]])
-        :format(
-          self._remote_xdg_config_path,
-          self._remote_xdg_data_path,
-          self._remote_xdg_state_path,
-          self._remote_xdg_cache_path,
-          remote_nvim.config.remote.app_name,
-          self:_remote_neovim_binary_path(),
-          remote_free_port
-        )
-
-    -- If we have a specified working directory, we launch there
-    if self._remote_working_dir then
-      remote_server_launch_cmd = ("%s --cmd ':cd %s'"):format(remote_server_launch_cmd, self._remote_working_dir)
-    end
-
-    self:_run_code_in_coroutine(function()
-      self:run_command(
-        remote_server_launch_cmd,
-        "Launching Neovim server on the remote machine",
-        port_forward_opts,
-        function(node)
-          return function(exit_code)
-            local success_code = (exit_code == 0 or self._provider_stopped_neovim)
-            self.progress_viewer:update_status(success_code and "success" or "failed", true, node)
-            if not success_code then
-              remote_nvim.dashboard:show()
-            end
-
-            if not self._provider_stopped_neovim then
-              self:stop_neovim()
-            end
-
-            self:_reset()
-          end
-        end
-      )
-      vim.notify("Remote server stopped", vim.log.levels.INFO)
-    end, "Launching Remote Neovim server")
-    self._remote_server_process_id = self.executor:last_job_id()
-    if self:is_remote_server_running() then
-      --TODO: save as bound connection
-      -- self.progress_viewer:add_session_node({
-      --   type = "info_node",
-      --   value = ("Remote server available at localhost:%s"):format(self._local_free_port),
-      -- })
-    end
-  end
-end
+-- function Provider:_launch_remote_neovim_server()
+--   if not self:is_remote_server_running() then
+--     -- Find free port on remote
+--     local free_port_on_remote_cmd = ("%s -l %s"):format(
+--       self:_remote_neovim_binary_path(),
+--       utils.path_join(self._remote_is_windows, self._remote_scripts_path, "free_port_finder.lua")
+--     )
+--     self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
+--     local remote_free_port_output = self.executor:job_stdout()
+--     local remote_free_port = remote_free_port_output[#remote_free_port_output]
+--     self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_host_id, remote_free_port)
+--
+--     self._local_free_port = provider_utils.find_free_port()
+--     self.logger.fmt_debug(
+--       "[%s][%s] Local free port: %s",
+--       self.provider_type,
+--       self.unique_host_id,
+--       self._local_free_port
+--     )
+--
+--     -- Launch Neovim server and port forward
+--     local port_forward_opts = ([[-t -L %s:localhost:%s]]):format(self._local_free_port, remote_free_port)
+--     local remote_server_launch_cmd = ([[XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s XDG_STATE_HOME=%s XDG_CACHE_HOME=%s NVIM_APPNAME=%s %s --listen 0.0.0.0:%s --headless]])
+--         :format(
+--           self._remote_xdg_config_path,
+--           self._remote_xdg_data_path,
+--           self._remote_xdg_state_path,
+--           self._remote_xdg_cache_path,
+--           remote_nvim.config.remote.app_name,
+--           self:_remote_neovim_binary_path(),
+--           remote_free_port
+--         )
+--
+--     -- If we have a specified working directory, we launch there
+--     if self._remote_working_dir then
+--       remote_server_launch_cmd = ("%s --cmd ':cd %s'"):format(remote_server_launch_cmd, self._remote_working_dir)
+--     end
+--
+--     self:_run_code_in_coroutine(function()
+--       self:run_command(
+--         remote_server_launch_cmd,
+--         "Launching Neovim server on the remote machine",
+--         port_forward_opts,
+--         function(node)
+--           return function(exit_code)
+--             local success_code = (exit_code == 0 or self._provider_stopped_neovim)
+--             self.progress_viewer:update_status(success_code and "success" or "failed", true, node)
+--             if not success_code then
+--               remote_nvim.dashboard:show()
+--             end
+--
+--             if not self._provider_stopped_neovim then
+--               self:stop_neovim()
+--             end
+--
+--             self:_reset()
+--           end
+--         end
+--       )
+--       vim.notify("Remote server stopped", vim.log.levels.INFO)
+--     end, "Launching Remote Neovim server")
+--     self._remote_server_process_id = self.executor:last_job_id()
+--     if self:is_remote_server_running() then
+--       --TODO: save as bound connection
+--       -- self.progress_viewer:add_session_node({
+--       --   type = "info_node",
+--       --   value = ("Remote server available at localhost:%s"):format(self._local_free_port),
+--       -- })
+--     end
+--   end
+-- end
 
 ---@protected
 ---Run code in a coroutine
@@ -1109,7 +1111,7 @@ function Provider:_launch_neovim(start_run)
     end
     self:_setup_workspace_variables()
     self:_setup_remote()
-    self:_launch_remote_neovim_server()
+    self:_spawn_remote_neovim_server(false)
   end
   self:_launch_local_neovim_client()
   self.logger.fmt_debug(("[%s][%s] Completed remote neovim launch"):format(self.provider_type, self.unique_host_id))
@@ -1143,7 +1145,7 @@ function Provider:spawn()
         self:start_progress_view_run(("Spawn new client"))
         self:_setup_workspace_variables()
         self:_setup_remote()
-        self:_spawn_remote_neovim_server()
+        self:_spawn_remote_neovim_server(true)
         self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))
       end
     end,
