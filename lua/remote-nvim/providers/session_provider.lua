@@ -30,12 +30,12 @@ function SessionProvider:get_or_initialize_session(opts)
     error("Unknown provider type")
   end
 
-  local host_id = provider:get_unique_host_id()
-  if self.sessions[host_id] == nil then
-    self.sessions[host_id] = provider
-  end
+  -- local host_id = provider:get_unique_host_id()
+  -- if self.sessions[host_id] == nil then
+  --   self.sessions[host_id] = provider
+  -- end
 
-  return self.sessions[host_id]
+  return provider
 end
 
 function SessionProvider:get_session(host_id)

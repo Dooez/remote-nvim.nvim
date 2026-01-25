@@ -16,6 +16,8 @@ M.hl_groups = {
   RemoteNvimInfoValue = { link = "LspInlayHint" },
   RemoteNvimOutput = { link = "Comment" },
   RemoteNvimSubInfo = { link = "RemoteNvimOutput" },
+  RemoteNvimToggleActive = { link = "RemoteNvimActiveHeading" },
+  RemoteNvimToggleInactive = { link = "RemoteNvimInactiveHeading" },
 }
 
 for hl_name, hl_group in pairs(M.hl_groups) do

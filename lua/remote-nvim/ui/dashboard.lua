@@ -8,6 +8,10 @@ local hl_groups = require("remote-nvim.colors").hl_groups
 ---@type remote-nvim.RemoteNeovim
 local remote_nvim = require("remote-nvim")
 
+---@alias workspaces_node_type "root_node"|"ws_node"|"toggle_head"|"toggle_node"
+---@alias workspace_toggle_value "yes"|"no"|"ask"
+---@alias connections_node_type "root_node"|"conn_node"|"conn_info_node"
+
 ---@class remote-nvim.ui.Dashboard.Keymaps: vim.api.keyset.keymap
 ---@field key string Key which invokes the keymap action
 ---@field action function Action to apply when the keymap gets invoked
@@ -39,6 +43,8 @@ local remote_nvim = require("remote-nvim")
 
 ---@class remove-nvim.ui.Dashboard
 local Dashboard = {}
+
+local toggle_key_strings = {}
 
 function Dashboard:init()
   local progress_view_config = remote_nvim.config.progress_view
@@ -333,11 +339,20 @@ function Dashboard:_initialize_workspaces_tree()
 
       if node_type == "root_node" then
         line:append((node:is_expanded() and " " or " ") .. node.key .. ": ", hl_groups.RemoteNvimHeading.name)
+      elseif node_type == "toggle_head" then
+        line:append((node:is_expanded() and " " or " ") .. node.key, hl_groups.RemoteNvimInfoKey.name)
+      elseif node_type == "toggle_node" then
+        local toggle = node.value == nil and "ask" or node.value and "yes" or "no"
+        local active = hl_groups.RemoteNvimToggleActive.name
+        local inactive = hl_groups.RemoteNvimToggleInactive.name
+        line:append(" " .. toggle_key_strings[node.key] .. ": ", hl_groups.RemoteNvimInfoKey.name)
+        line:append(" ask ", toggle == "ask" and active or inactive)
+        line:append(" yes ", toggle == "yes" and active or inactive)
+        line:append(" no ", toggle == "no" and active or inactive)
       else
-        line:append(" ")
         line:append(node.key .. ": ", hl_groups.RemoteNvimInfoKey.name)
+        line:append(node.value or "<not-provided>", hl_groups.RemoteNvimInfoValue.name)
       end
-      line:append(node.value or "<not-provided>", hl_groups.RemoteNvimInfoValue.name)
 
       if parent_node and parent_node.last_child_id == node:get_id() then
         return {
@@ -350,7 +365,7 @@ function Dashboard:_initialize_workspaces_tree()
   })
 
   ---@param ws_cfg remote-nvim.providers.WorkspaceConfig
-  local add_worspace_node = function(ws_cfg)
+  local add_workspace_node = function(ws_cfg)
     local root_node = NuiTree.Node({
       key = ws_cfg.workspace_id,
       value = ws_cfg.host,
@@ -377,10 +392,36 @@ function Dashboard:_initialize_workspaces_tree()
     add_line("Connection opts ", (ws_cfg.connection_options == "" and "<no-extra-options>" or ws_cfg.connection_options))
     add_line("Neovim version  ", ws_cfg.neovim_version)
     add_line("Last sync       ", ws_cfg.last_sync)
+    local toggle_head = NuiTree.Node({
+      key = "Launch options",
+      -- value = value,
+      type = "toggle_head",
+      parent_node = root_node,
+      workspace_config = ws_cfg,
+    })
+    self.workspaces_pane_tree:add_node(toggle_head, root_id)
+    local toggle_head_id = toggle_head:get_id()
+    local add_toggle_line = function(key, value)
+      local node = NuiTree.Node({
+        key = key,
+        value = ws_cfg[key],
+        type = "toggle_node",
+        locked = false,
+        parent_node = root_node,
+        workspace_config = ws_cfg,
+      })
+      self.workspaces_pane_tree:add_node(node, toggle_head_id)
+      root_node.last_child_id = node:get_id()
+    end
+    add_toggle_line("config_copy")
+    add_toggle_line("dot_config_copy")
+    add_toggle_line("data_copy")
+    add_toggle_line("client_auto_start")
   end
   local workspaces = workspace_cfg:get_workspace_config()
-  for _, ws in pairs(workspaces) do
-    add_worspace_node(ws)
+  for id, ws in pairs(workspaces) do
+    ws.host_id = id --TODO: remove, this is a hack
+    add_workspace_node(ws)
   end
 end
 
@@ -681,6 +722,66 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
   end
   return {
     {
+      key = "t",
+      action = function()
+        local node = tree:get_node()
+        if not node then return end
+        if not node.type == "toggle_node" then return end
+
+        ---@type remote-nvim.providers.WorkspaceConfig
+        local ws_cfg = node.workspace_config
+        local new_ws_cfg = workspace_cfg:get_workspace_config(ws_cfg.host_id, ws_cfg.provider)
+        local value = new_ws_cfg[node.key]
+
+        if value == nil then
+          new_ws_cfg[node.key] = true
+        elseif value then
+          new_ws_cfg[node.key] = false
+        else
+          new_ws_cfg[node.key] = nil
+        end
+        workspace_cfg:update_workspace_config(ws_cfg.host_id)
+        workspace_cfg:update_workspace_config(ws_cfg.host_id, new_ws_cfg)
+        node.value = new_ws_cfg[node.key]
+        tree:render(start_linenr)
+      end,
+      desc = "[t]oggle launch option",
+    },
+    {
+      key = "A",
+      action = function()
+        local ssh_args = vim.trim(vim.fn.input("ssh "))
+        if ssh_args == "" then
+          return
+        end
+        local ssh_host = ssh_args:match("%S+@%S+")
+
+        --- If there is only one parameter provided, it must be remote host
+        if #vim.split(ssh_args, "%s") == 1 then
+          ssh_host = ssh_args
+        end
+
+        if ssh_host == nil or ssh_host == "" then
+          vim.notify("Could not automatically determine host", vim.log.levels.WARN)
+          ssh_host = vim.fn.input("Enter hostname in conn. string: ")
+        end
+
+        -- If no valid host name has been provided, exit
+        if ssh_host == "" then
+          vim.notify("Failed to determine the host to connect to. Aborting..", vim.log.levels.ERROR)
+          return
+        end
+
+        remote_nvim.session_provider
+            :get_or_initialize_session({
+              host = ssh_host,
+              provider_type = "ssh",
+              conn_opts = { ssh_args },
+            }):sync()
+      end,
+      desc = "Spawn [N]ew Connection",
+    },
+    {
       key = "N",
       action = function()
         local node = tree:get_node()
@@ -793,5 +894,13 @@ function Dashboard:_get_connections_keymaps(tree, start_linenr)
     },
   }
 end
+
+---@format disable
+toggle_key_strings = {
+  config_copy =       "Sync neovim config ",
+  dot_config_copy =   "Sync .config       ",
+  data_copy =         "Sync neovim data   ",
+  client_auto_start = "Start local client "
+}
 
 return Dashboard:init()

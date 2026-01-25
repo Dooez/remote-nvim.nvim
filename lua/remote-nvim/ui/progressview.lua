@@ -5,8 +5,6 @@ local remote_nvim = require("remote-nvim")
 
 ---@alias progress_view_node_type "run_node"|"section_node"|"command_node"|"stdout_node"
 ---@alias session_node_type "local_node"|"remote_node"|"config_node"|"root_node"|"info_node"
----@alias workspaces_node_type "root_node"|"ws_node"|"ws_info_node"
----@alias connections_node_type "root_node"|"conn_node"|"conn_info_node"
 ---@alias progress_view_status "running"|"success"|"failed"|"no_op"
 
 ---@class remote-nvim.ui.ProgressView.Keymaps: vim.api.keyset.keymap
