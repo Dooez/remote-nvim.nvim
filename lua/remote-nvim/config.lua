@@ -78,16 +78,11 @@ end
 function ConfigProvider:update_workspace_config(unique_ws_id, ws_config)
   config_data = self:_read_workspace_data()
   if ws_config then
-    utils.get_logger().debug("before " .. unique_ws_id)
-    for k, v in pairs(self:get_workspace_config(unique_ws_id)) do
-      utils.get_logger().debug(k .. " " .. v)
-    end
-    local new_conf = vim.tbl_extend("force", self:get_workspace_config(unique_ws_id), ws_config)
-    utils.get_logger().debug("after" .. unique_ws_id)
-    for k, v in pairs(new_conf) do
+    local new_cfg = vim.tbl_extend("force", self:get_workspace_config(unique_ws_id), ws_config)
+    config_data[unique_ws_id] = new_cfg
+    for k, v in pairs(config_data[unique_ws_id]) do
       utils.get_logger().debug(k .. " " .. tostring(v))
     end
-    config_data[unique_ws_id] = new_conf
   else
     utils.get_logger().debug("removing workspace " .. unique_ws_id)
     config_data[unique_ws_id] = nil

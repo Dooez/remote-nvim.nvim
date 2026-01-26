@@ -10,7 +10,7 @@
 ---@field os os_type? OS running on the remote host
 ---@field arch string? Arch of the remote host
 ---@field host string? Host name to whom the workspace belongs
----@field host_id string? Host id name to whom the workspace belongs
+---@field unique_id string? Host id name to whom the workspace belongs
 ---@field neovim_version string? Version of Neovim running on the remote
 ---@field connection_options string? Connection options needed to connect to the remote host
 ---@field remote_neovim_home string? Path on remote host where remote-neovim installs/configures things
@@ -171,13 +171,14 @@ function Provider:_setup_workspace_variables(sync)
       or vim.tbl_isempty(self._config_provider:get_workspace_config(self.unique_host_id)) then
     self.logger.debug("Did not find any existing configuration. Creating one now..")
     local workspace_id = self:_get_neovim_workspace_id_preference() or utils.generate_random_string(10)
-    self.unique_host_id = workspace_id .. self:_get_unique_host_id()
+    self.unique_host_id = workspace_id .. ":" .. self:_get_unique_host_id()
     self:run_command("echo 'Hello'", "Testing remote connection")
 
     self._config_provider:add_workspace_config(self.unique_host_id, {
       provider = self.provider_type,
       host = self.host,
       connection_options = self.conn_opts,
+      unique_id = self.unique_host_id,
       remote_neovim_home = nil,
       config_copy = nil,
       dot_config_copy = nil,
@@ -273,8 +274,9 @@ function Provider:_setup_workspace_variables(sync)
     self:run_command(("mv %s %s"):format(old_workspace_path, new_workspace_path),
       ("Changing remote workspace id from %s to %s"):format(old_workspace_path, new_workspace_path))
     self._host_ws_config.workspace_id = rename_id
+    self.unique_host_id = rename_id .. ":" .. self:_get_unique_host_id()
+    self._host_ws_config.unique_id = self.unique_host_id
     self._config_provider:update_workspace_config(self.unique_host_id)
-    self.unique_host_id = rename_id .. self:_get_unique_host_id()
 
     -- self._config_provider:update_workspace_config(self.unique_host_id, { workspace_id = rename_id })
   end
@@ -1118,7 +1120,7 @@ function Provider:spawn()
         self.unique_host_id))
       if not self:is_remote_server_running() then
         self:start_progress_view_run(("Spawn new client"))
-        self:_setup_workspace_variables()
+        self:_setup_workspace_variables(false)
         self:_setup_remote()
         self:_spawn_remote_neovim_server(true)
         self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))

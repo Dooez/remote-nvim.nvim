@@ -730,7 +730,7 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
 
         ---@type remote-nvim.providers.WorkspaceConfig
         local ws_cfg = node.workspace_config
-        local new_ws_cfg = workspace_cfg:get_workspace_config(ws_cfg.host_id, ws_cfg.provider)
+        local new_ws_cfg = workspace_cfg:get_workspace_config(ws_cfg.unique_id, ws_cfg.provider)
         local value = new_ws_cfg[node.key]
 
         if value == nil then
@@ -740,8 +740,8 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
         else
           new_ws_cfg[node.key] = nil
         end
-        workspace_cfg:update_workspace_config(ws_cfg.host_id)
-        workspace_cfg:update_workspace_config(ws_cfg.host_id, new_ws_cfg)
+        workspace_cfg:update_workspace_config(ws_cfg.unique_id)
+        workspace_cfg:update_workspace_config(ws_cfg.unique_id, new_ws_cfg)
         node.value = new_ws_cfg[node.key]
         tree:render(start_linenr)
       end,
@@ -779,7 +779,7 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
               conn_opts = { ssh_args },
             }):sync()
       end,
-      desc = "Spawn [N]ew Connection",
+      desc = "[A]dd new workspace",
     },
     {
       key = "N",
@@ -797,6 +797,7 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
           conn_opts = { ws_cfg.connection_options },
           devpod_opts = devpod_utils.get_workspace_devpod_opts(ws_cfg),
           progress_view = require("remote-nvim.ui.progressview")(),
+          unique_host_id = ws_cfg.unique_id
         }
         ---@type remote-nvim.providers.Provider
         local provider
