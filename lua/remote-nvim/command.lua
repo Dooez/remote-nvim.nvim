@@ -109,7 +109,7 @@ function M.RemoteSpawn(opts)
             unique_host_id = host_identifier,
             devpod_opts = devpod_utils.get_workspace_devpod_opts(workspace_config),
           })
-          :spawn()
+          :launch_neovim()
     end
   end
 end

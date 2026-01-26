@@ -104,11 +104,11 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("by creating new workspace config record when does not exist if able to connect to remote machine", function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
       provider:_setup_workspace_variables()
 
       assert.are.same({
@@ -123,11 +123,11 @@ describe("Provider", function()
         workspace_id = workspace_id,
         neovim_version = "stable",
         os = "Linux",
-      }, provider._config_provider:get_workspace_config(provider.unique_host_id))
+      }, provider._config_provider:get_workspace_config(provider.unique_ws_id))
     end)
 
     it("by not creating workspace config record if not able to connect to remote", function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
       local executor_job_status_stub = stub(provider.executor, "last_job_status")
       executor_job_status_stub.returns(255)
 
@@ -135,26 +135,26 @@ describe("Provider", function()
         provider:_setup_workspace_variables()
       end)
       coroutine.resume(co)
-      assert(vim.tbl_isempty(provider._config_provider:get_workspace_config(provider.unique_host_id)))
+      assert(vim.tbl_isempty(provider._config_provider:get_workspace_config(provider.unique_ws_id)))
     end)
 
     it("by setting up remote OS if not set", function()
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         os = nil,
       })
       provider:_setup_workspace_variables()
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal("Linux", wk_config["os"])
     end)
 
     it("by setting up remote Neovim if not set", function()
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         neovim_version = nil,
       })
       provider:_setup_workspace_variables()
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal("stable", wk_config["neovim_version"])
     end)
 
@@ -377,7 +377,7 @@ describe("Provider", function()
 
     before_each(function()
       selection_stub = stub(provider, "get_selection")
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         provider = provider.provider_type,
         host = provider.host,
         connection_options = provider.conn_opts,
@@ -394,17 +394,17 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("when the value is already known", function()
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         config_copy = true,
       })
       provider:_setup_workspace_variables()
       assert.equals(true, provider:_get_neovim_config_upload_preference())
 
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         config_copy = false,
       })
       provider:_setup_workspace_variables()
@@ -415,7 +415,7 @@ describe("Provider", function()
       selection_stub.returns("Yes (always)")
       assert.equals(true, provider:_get_neovim_config_upload_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(true, wk_config["config_copy"])
     end)
 
@@ -423,7 +423,7 @@ describe("Provider", function()
       selection_stub.returns("No (never)")
       assert.equals(false, provider:_get_neovim_config_upload_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(false, wk_config["config_copy"])
     end)
 
@@ -431,7 +431,7 @@ describe("Provider", function()
       selection_stub.returns("Yes")
       assert.equals(true, provider:_get_neovim_config_upload_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(nil, wk_config["config_copy"]) -- The value should not be stored
     end)
 
@@ -439,7 +439,7 @@ describe("Provider", function()
       selection_stub.returns("No")
       assert.equals(false, provider:_get_neovim_config_upload_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(nil, wk_config["config_copy"]) -- The value should not be stored
     end)
   end)
@@ -450,7 +450,7 @@ describe("Provider", function()
     before_each(function()
       run_command_stub = stub(provider, "run_command")
       selection_stub = stub(provider, "get_selection")
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         provider = provider.provider_type,
         host = provider.host,
         connection_options = provider.conn_opts,
@@ -467,7 +467,7 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("when asked to cleanup just the remote workspace", function()
@@ -481,7 +481,7 @@ describe("Provider", function()
         nil,
         match.is_function()
       )
-      assert.are.same({}, provider._config_provider:get_workspace_config(provider.unique_host_id))
+      assert.are.same({}, provider._config_provider:get_workspace_config(provider.unique_ws_id))
     end)
 
     it("when asked to cleanup entire remote neovim directory", function()
@@ -495,7 +495,7 @@ describe("Provider", function()
         nil,
         match.is_function()
       )
-      assert.are.same({}, provider._config_provider:get_workspace_config(provider.unique_host_id))
+      assert.are.same({}, provider._config_provider:get_workspace_config(provider.unique_ws_id))
     end)
   end)
 
@@ -592,7 +592,7 @@ describe("Provider", function()
         upload_stub = stub(provider, "upload")
         offline_mode_config = vim.deepcopy(remote_nvim.config.offline_mode)
 
-        provider._config_provider:add_workspace_config(provider.unique_host_id, {
+        provider._config_provider:add_workspace_config(provider.unique_ws_id, {
           provider = "local",
           host = provider_host,
           connection_options = "",
@@ -610,7 +610,7 @@ describe("Provider", function()
 
       after_each(function()
         remote_nvim.config.offline_mode = offline_mode_config
-        provider._config_provider:remove_workspace_config(provider.unique_host_id)
+        provider._config_provider:remove_workspace_config(provider.unique_ws_id)
       end)
 
       it("in default scenario", function()
@@ -650,7 +650,7 @@ describe("Provider", function()
       end)
 
       it("when we do not want to copy config", function()
-        provider._config_provider:update_workspace_config(provider.unique_host_id, {
+        provider._config_provider:update_workspace_config(provider.unique_ws_id, {
           config_copy = false,
         })
         provider:_setup_workspace_variables()
@@ -784,7 +784,7 @@ describe("Provider", function()
       is_remote_server_running_stub = stub(provider, "is_remote_server_running")
       run_command_stub = stub(provider, "run_command")
 
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         provider = "local",
         host = provider_host,
         connection_options = "",
@@ -801,7 +801,7 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("when a remote server is already running", function()
@@ -866,7 +866,7 @@ describe("Provider", function()
 
     before_each(function()
       selection_stub = stub(provider, "get_selection")
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         provider = provider.provider_type,
         host = provider.host,
         connection_options = provider.conn_opts,
@@ -882,17 +882,17 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("when the value is already known", function()
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         client_auto_start = true,
       })
       provider:_setup_workspace_variables()
       assert.equals(true, provider:_get_local_client_start_preference())
 
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         client_auto_start = false,
       })
       provider:_setup_workspace_variables()
@@ -903,7 +903,7 @@ describe("Provider", function()
       selection_stub.returns("Yes (always)")
       assert.equals(true, provider:_get_local_client_start_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(true, wk_config["client_auto_start"])
     end)
 
@@ -911,7 +911,7 @@ describe("Provider", function()
       selection_stub.returns("No (never)")
       assert.equals(false, provider:_get_local_client_start_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(false, wk_config["client_auto_start"])
     end)
 
@@ -919,7 +919,7 @@ describe("Provider", function()
       selection_stub.returns("Yes")
       assert.equals(true, provider:_get_local_client_start_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(nil, wk_config["client_auto_start"])
     end)
 
@@ -927,14 +927,14 @@ describe("Provider", function()
       selection_stub.returns("No")
       assert.equals(false, provider:_get_local_client_start_preference())
 
-      local wk_config = provider._config_provider:get_workspace_config(provider.unique_host_id)
+      local wk_config = provider._config_provider:get_workspace_config(provider.unique_ws_id)
       assert.are.equal(nil, wk_config["client_auto_start"])
     end)
   end)
 
   describe("should handle local client launch correctly", function()
     before_each(function()
-      provider._config_provider:add_workspace_config(provider.unique_host_id, {
+      provider._config_provider:add_workspace_config(provider.unique_ws_id, {
         provider = provider.provider_type,
         host = provider.host,
         connection_options = provider.conn_opts,
@@ -950,11 +950,11 @@ describe("Provider", function()
     end)
 
     after_each(function()
-      provider._config_provider:remove_workspace_config(provider.unique_host_id)
+      provider._config_provider:remove_workspace_config(provider.unique_ws_id)
     end)
 
     it("when user does not want to launch client", function()
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         client_auto_start = false,
       })
       local defined_callback_stub = stub(remote_nvim.config, "client_callback")
@@ -964,7 +964,7 @@ describe("Provider", function()
     end)
 
     it("when user wants to launch client", function()
-      provider._config_provider:update_workspace_config(provider.unique_host_id, {
+      provider._config_provider:update_workspace_config(provider.unique_ws_id, {
         client_auto_start = true,
       })
       provider:_setup_workspace_variables()

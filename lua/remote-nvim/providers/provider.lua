@@ -4,6 +4,14 @@
 ---@alias neovim_install_method "binary"|"source"|"system"
 ---@alias session_action_type "launch"|"sync"|"spawn"
 
+---Optional flags that control behaviour on launching remote connection. Missing flags will result in a prompt
+---@class remote-nvim.providers.WorkspaceConfig.OnLaunch
+---@field persistent_connection? boolean
+---@field copy_nvim_config? boolean
+---@field copy_dot_config? boolean
+---@field copy_nvim_data? boolean
+---@field launch_local_client? boolean
+
 ---@class remote-nvim.providers.WorkspaceConfig
 ---@field provider provider_type? Which provider is responsible for managing this workspace
 ---@field workspace_id string? Unique ID for workspace
@@ -15,10 +23,7 @@
 ---@field connection_options string? Connection options needed to connect to the remote host
 ---@field remote_neovim_home string? Path on remote host where remote-neovim installs/configures things
 ---@field neovim_install_method neovim_install_method? How was the remote Neovim installed in the workspace
----@field config_copy boolean? Flag indicating if the config should be copied or not
----@field dot_config_copy boolean? Flag indicating if the .config should be copied or not
----@field data_copy boolean? Flag indicating if the data directories should be copied or not
----@field client_auto_start boolean? Flag indicating if the client should be auto started or not
+---@field on_launch remote-nvim.providers.WorkspaceConfig.OnLaunch? Connection launch behaviour
 ---@field offline_mode boolean? Should we operate in offline mode
 ---@field last_sync string? Date of last syncronization
 ---@field devpod_source_opts remote-nvim.providers.DevpodSourceOpts? Devpod related source options
@@ -27,7 +32,7 @@
 ---@field host string Host name
 ---@field conn_opts string Connection options
 ---@field provider_type provider_type Type of provider
----@field protected unique_host_id string Unique host identifier
+---@field protected unique_ws_id string Unique host identifier
 ---@field protected executor remote-nvim.providers.Executor Executor instance
 ---@field protected local_executor remote-nvim.providers.Executor Local executor instance
 ---@field protected connections remote-nvim.providers.Connections Connections provider instance
@@ -137,7 +142,7 @@ function Provider:init(opts)
   self.offline_mode = remote_nvim.config.offline_mode.enabled or false
 
   -- These should be overriden in implementing classes
-  self.unique_host_id = opts.unique_host_id
+  self.unique_ws_id = opts.unique_host_id
   self.provider_type = "local"
   self.local_executor = Executor()
   self.executor = self.local_executor
@@ -150,7 +155,7 @@ function Provider:init(opts)
   self._remote_working_dir = opts.devpod_opts.working_dir
 
   ---@diagnostic disable-next-line: missing-fields
-  self._host_ws_config = {}
+  self._ws_config = {}
   self:_reset()
 end
 
@@ -167,18 +172,18 @@ end
 ---@param sync boolean? Should prompt to update workspace id
 function Provider:_setup_workspace_variables(sync)
   local new_workspace = false
-  if not self.unique_host_id
-      or vim.tbl_isempty(self._config_provider:get_workspace_config(self.unique_host_id)) then
+  if not self.unique_ws_id
+      or vim.tbl_isempty(self._config_provider:get_workspace_config(self.unique_ws_id)) then
     self.logger.debug("Did not find any existing configuration. Creating one now..")
     local workspace_id = self:_get_neovim_workspace_id_preference() or utils.generate_random_string(10)
-    self.unique_host_id = workspace_id .. ":" .. self:_get_unique_host_id()
+    self.unique_ws_id = workspace_id .. ":" .. self:_get_unique_host_id()
     self:run_command("echo 'Hello'", "Testing remote connection")
 
-    self._config_provider:add_workspace_config(self.unique_host_id, {
+    self._config_provider:add_workspace_config(self.unique_ws_id, {
       provider = self.provider_type,
       host = self.host,
       connection_options = self.conn_opts,
-      unique_id = self.unique_host_id,
+      unique_id = self.unique_ws_id,
       remote_neovim_home = nil,
       config_copy = nil,
       dot_config_copy = nil,
@@ -190,76 +195,63 @@ function Provider:_setup_workspace_variables(sync)
   else
     self.logger.debug("Found an existing workspace & host. Re-using the same configuration..")
   end
-  self._host_ws_config = self._config_provider:get_workspace_config(self.unique_host_id)
+  self._ws_config = self._config_provider:get_workspace_config(self.unique_ws_id)
 
   local rename_id
   if sync and not new_workspace then
     rename_id = self:_get_neovim_workspace_id_preference()
 
-    self._host_ws_config.neovim_version = nil
-    self._host_ws_config.remote_neovim_home = nil
-    self._host_ws_config.neovim_install_method = nil
-    self._host_ws_config.config_copy = nil
-    self._host_ws_config.dot_config_copy = nil
-    self._host_ws_config.data_copy = nil
-    self._host_ws_config.client_auto_start = nil
-    self._host_ws_config.offline_mode = nil
-    -- self._config_provider:update_workspace_config(self.unique_host_id)
-    -- self._config_provider:update_workspace_config(self.unique_host_id, self._host_ws_config)
+    self._ws_config.neovim_version = nil
+    self._ws_config.remote_neovim_home = nil
+    self._ws_config.neovim_install_method = nil
+    self._ws_config.persistent = nil
+    self._ws_config.on_launch = {}
+    self._ws_config.offline_mode = nil
   end
 
   -- Gather remote OS information
-  if self._host_ws_config.os == nil or self._host_ws_config.arch == nil then
-    self._host_ws_config.os, self._host_ws_config.arch = self:_get_remote_os_and_arch()
-    -- self._config_provider:update_workspace_config(self.unique_host_id, {
-    --   os = self._host_ws_config.os,
-    --   arch = self._host_ws_config.arch,
-    -- })
+  if self._ws_config.os == nil or self._ws_config.arch == nil then
+    self._ws_config.os, self._ws_config.arch = self:_get_remote_os_and_arch()
   end
-  self._remote_os = self._host_ws_config.os
-  self._remote_arch = utils.get_release_arch_name(self._host_ws_config.arch)
+  self._remote_os = self._ws_config.os
+  self._remote_arch = utils.get_release_arch_name(self._ws_config.arch)
 
-  if self._host_ws_config.neovim_version == nil then
+  if self._ws_config.neovim_version == nil then
     local prompt_title
 
-    if provider_utils.is_binary_release_available(self._host_ws_config.os, self._host_ws_config.arch) then
-      self._host_ws_config.neovim_install_method = "binary"
+    if provider_utils.is_binary_release_available(self._ws_config.os, self._ws_config.arch) then
+      self._ws_config.neovim_install_method = "binary"
       prompt_title = "Choose Neovim version to install"
     else
-      self._host_ws_config.neovim_install_method = "source"
+      self._ws_config.neovim_install_method = "source"
       prompt_title = "Binary release not available. Choose Neovim version to install"
     end
-    self._remote_neovim_install_method = self._host_ws_config.neovim_install_method
-    self._host_ws_config.neovim_version = self:_get_remote_neovim_version_preference(prompt_title)
+    self._remote_neovim_install_method = self._ws_config.neovim_install_method
+    self._ws_config.neovim_version = self:_get_remote_neovim_version_preference(prompt_title)
 
     -- Set installation method to "system" if not found
-    if self._host_ws_config.neovim_version == "system" then
-      self._host_ws_config.neovim_install_method = "system"
+    if self._ws_config.neovim_version == "system" then
+      self._ws_config.neovim_install_method = "system"
     end
-
-    -- self._config_provider:update_workspace_config(self.unique_host_id, {
-    --   neovim_install_method = self._host_ws_config.neovim_install_method,
-    --   neovim_version = self._host_ws_config.neovim_version,
-    -- })
   end
-  self._remote_neovim_version = self._host_ws_config.neovim_version
-  self._remote_neovim_install_method = self._host_ws_config.neovim_install_method
+  self._remote_neovim_version = self._ws_config.neovim_version
+  self._remote_neovim_install_method = self._ws_config.neovim_install_method
 
   -- Set remote neovim home path
-  if self._host_ws_config.remote_neovim_home == nil then
-    self._host_ws_config.remote_neovim_home = self:_get_remote_neovim_home()
-    self._config_provider:update_workspace_config(self.unique_host_id, {
-      remote_neovim_home = self._host_ws_config.remote_neovim_home,
+  if self._ws_config.remote_neovim_home == nil then
+    self._ws_config.remote_neovim_home = self:_get_remote_neovim_home()
+    self._config_provider:update_workspace_config(self.unique_ws_id, {
+      remote_neovim_home = self._ws_config.remote_neovim_home,
     })
   end
-  self._remote_neovim_home = self._host_ws_config.remote_neovim_home
+  self._remote_neovim_home = self._ws_config.remote_neovim_home
 
   -- Set variables from the fetched configuration
   self._remote_is_windows = self._remote_os == "Windows" and true or false
 
   -- Set up remaining workspace variables
-  self._remote_workspaces_path = utils.path_join(self._remote_is_windows, self._remote_neovim_home, "workspaces")
-  self._remote_scripts_path = utils.path_join(self._remote_is_windows, self._remote_neovim_home, "scripts")
+  self._remote_workspaces_path = self:remote_path_join(self._remote_neovim_home, "workspaces")
+  self._remote_scripts_path = self:remote_path_join(self._remote_neovim_home, "scripts")
   self._remote_neovim_install_script_path = self:remote_path_join(
     self._remote_scripts_path,
     vim.fn.fnamemodify(remote_nvim.config.neovim_install_script_path, ":t")
@@ -268,19 +260,19 @@ function Provider:_setup_workspace_variables(sync)
   self._remote_neovim_utils_script_path = self:remote_path_join(self._remote_scripts_path, "utils/neovim.sh")
 
   if rename_id ~= nil then
-    local old_id = self._host_ws_config.workspace_id
+    local old_id = self._ws_config.workspace_id
     local old_workspace_path = self:remote_path_join(self._remote_workspaces_path, old_id)
     local new_workspace_path = self:remote_path_join(self._remote_workspaces_path, rename_id)
     self:run_command(("mv %s %s"):format(old_workspace_path, new_workspace_path),
       ("Changing remote workspace id from %s to %s"):format(old_workspace_path, new_workspace_path))
-    self._host_ws_config.workspace_id = rename_id
-    self.unique_host_id = rename_id .. ":" .. self:_get_unique_host_id()
-    self._host_ws_config.unique_id = self.unique_host_id
-    self._config_provider:update_workspace_config(self.unique_host_id)
+    self._ws_config.workspace_id = rename_id
+    self.unique_ws_id = rename_id .. ":" .. self:_get_unique_host_id()
+    self._ws_config.unique_id = self.unique_ws_id
+    self._config_provider:update_workspace_config(self.unique_ws_id)
 
     -- self._config_provider:update_workspace_config(self.unique_host_id, { workspace_id = rename_id })
   end
-  self._remote_workspace_id = self._host_ws_config.workspace_id
+  self._remote_workspace_id = self._ws_config.workspace_id
   self._remote_workspace_id_path = self:remote_path_join(self._remote_workspaces_path, self._remote_workspace_id)
 
   self._local_path_to_remote_neovim_config = get_copy_paths(remote_nvim.config.remote.copy_dirs.config)
@@ -303,8 +295,8 @@ function Provider:_setup_workspace_variables(sync)
   self._remote_neovim_config_path = self:remote_path_join(self._remote_xdg_config_path,
     remote_nvim.config.remote.app_name)
 
-  self._config_provider:update_workspace_config(self.unique_host_id)
-  self._config_provider:update_workspace_config(self.unique_host_id, self._host_ws_config)
+  self._config_provider:update_workspace_config(self.unique_ws_id)
+  self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
 
   -- self:_add_session_info()
 end
@@ -370,7 +362,7 @@ end
 ---Generate host identifer using host and port on host
 ---@return string host_id Unique identifier for the host
 function Provider:get_unique_host_id()
-  return self.unique_host_id
+  return self.unique_ws_id
 end
 
 ---@private
@@ -462,6 +454,11 @@ function Provider:get_selection(choices, selection_opts)
     self.progress_viewer:update_status("success", false, section_node)
     return choice
   end
+end
+
+---@return string? free_port Port used on local to connect with Neovim server
+function Provider:get_local_neovim_server_port()
+  return self._local_free_port
 end
 
 ---@private
@@ -566,93 +563,96 @@ function Provider:_get_remote_neovim_version_preference(prompt_title)
   return self._remote_neovim_version
 end
 
----@return string? free_port Port used on local to connect with Neovim server
-function Provider:get_local_neovim_server_port()
-  return self._local_free_port
+---@private
+---Get user preference about copying the local neovim data directories to remote
+---@return boolean preference Should the config be copied over
+function Provider:_get_persistent_connection_preference()
+  local on_launch = self._ws_config.on_launch or {}
+  if on_launch.persistent_connection == nil then
+    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
+      prompt = "Launch persistent connection?",
+    })
+
+    if choice == "Yes (always)" then
+      on_launch.persistent_connection = true
+    elseif choice == "No (never)" then
+      on_launch.persistent_connection = false
+    else
+      return (choice == "Yes" and true) or false
+    end
+    self._ws_config.on_launch = on_launch
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
+  end
+  return on_launch.persistent_connection
 end
 
 ---@private
 ---Get user preference about copying the local neovim data directories to remote
 ---@return boolean preference Should the config be copied over
 function Provider:_get_neovim_data_upload_preference()
-  if self._host_ws_config.data_copy == nil then
+  local on_launch = self._ws_config.on_launch or {}
+  if on_launch.copy_nvim_data == nil then
     local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
       prompt = "Copy local Neovim data to remote host? ",
     })
 
-    -- Handle choices
     if choice == "Yes (always)" then
-      self._host_ws_config.data_copy = true
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        data_copy = self._host_ws_config.data_copy,
-      })
+      on_launch.copy_nvim_data = true
     elseif choice == "No (never)" then
-      self._host_ws_config.data_copy = false
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        data_copy = self._host_ws_config.data_copy,
-      })
+      on_launch.copy_nvim_data = false
     else
-      self._host_ws_config.data_copy = (choice == "Yes" and true) or false
+      return (choice == "Yes" and true) or false
     end
+    self._ws_config.on_launch = on_launch
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
   end
-
-  return self._host_ws_config.data_copy
+  return on_launch.copy_nvim_data
 end
 
 ---@private
 ---Get user preference about copying the local config to remote
 ---@return boolean preference Should the config be copied over
 function Provider:_get_neovim_config_upload_preference()
-  if self._host_ws_config.config_copy == nil then
+  local on_launch = self._ws_config.on_launch or {}
+  if on_launch.copy_nvim_config == nil then
     local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
       prompt = "Copy local Neovim configuration to remote host? ",
     })
 
-    -- Handle choices
     if choice == "Yes (always)" then
-      self._host_ws_config.config_copy = true
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        config_copy = self._host_ws_config.config_copy,
-      })
+      on_launch.copy_nvim_config = true
     elseif choice == "No (never)" then
-      self._host_ws_config.config_copy = false
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        config_copy = self._host_ws_config.config_copy,
-      })
+      on_launch.copy_nvim_config = false
     else
-      self._host_ws_config.config_copy = (choice == "Yes" and true) or false
+      return (choice == "Yes" and true) or false
     end
+    self._ws_config.on_launch = on_launch
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
   end
-
-  return self._host_ws_config.config_copy
+  return on_launch.copy_nvim_config
 end
 
 ---@private
----Get user preference about copying the local config to remote
+---Get user preference about copying the local .config to remote
 ---@return boolean preference Should the config be copied over
 function Provider:_get_dot_config_upload_preference()
-  if self._host_ws_config.dot_config_copy == nil then
+  local on_launch = self._ws_config.on_launch or {}
+  if on_launch.copy_dot_config == nil then
     local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
       prompt = "Copy local .config to remote host? ",
     })
 
-    -- Handle choices
     if choice == "Yes (always)" then
-      self._host_ws_config.dot_config_copy = true
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        dot_config_copy = self._host_ws_config.dot_config_copy,
-      })
+      on_launch.copy_dot_config = true
     elseif choice == "No (never)" then
-      self._host_ws_config.dot_config_copy = false
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        dot_config_copy = self._host_ws_config.dot_config_copy,
-      })
+      on_launch.copy_dot_config = false
     else
-      self._host_ws_config.dot_config_copy = (choice == "Yes" and true) or false
+      return (choice == "Yes" and true) or false
     end
+    self._ws_config.on_launch = on_launch
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
   end
-
-  return self._host_ws_config.dot_config_copy
+  return on_launch.copy_dot_config
 end
 
 ---Verify if the server is already running or not
@@ -865,8 +865,8 @@ function Provider:_setup_remote()
         end
       end
     end
-    self._host_ws_config.last_sync = os.date(remote_nvim.config.ui.last_sync_date_format)
-    self._config_provider:update_workspace_config(self.unique_host_id, self._host_ws_config)
+    self._ws_config.last_sync = os.date(remote_nvim.config.ui.last_sync_date_format)
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
 
     self._setup_running = false
   else
@@ -876,8 +876,7 @@ end
 
 ---@private
 ---Spawn remote server
----@param persistent boolean
-function Provider:_spawn_remote_neovim_server(persistent)
+function Provider:_spawn_remote_neovim_server()
   -- Find free port on remote
   local free_port_on_remote_cmd = ("%s -l %s"):format(
     self:_remote_neovim_binary_path(),
@@ -886,13 +885,13 @@ function Provider:_spawn_remote_neovim_server(persistent)
   self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
   local remote_free_port_output = self.executor:job_stdout()
   local remote_free_port = remote_free_port_output[#remote_free_port_output]
-  self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_host_id, remote_free_port)
+  self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_ws_id, remote_free_port)
 
   self._local_free_port = provider_utils.find_free_port()
   self.logger.fmt_debug(
     "[%s][%s] Local free port: %s",
     self.provider_type,
-    self.unique_host_id,
+    self.unique_ws_id,
     self._local_free_port
   )
 
@@ -918,11 +917,11 @@ function Provider:_spawn_remote_neovim_server(persistent)
   })
   ---@type remote-nvim.providers.Connections.ConnectionInfo
   local connection_info = {
-    unique_host_id = self.unique_host_id,
+    unique_host_id = self.unique_ws_id,
     workspace_id = self._remote_workspace_id,
     local_port = self._local_free_port,
-    workspace = self._host_ws_config,
-    persistent = persistent,
+    workspace = self._ws_config,
+    persistent = self:_get_persistent_connection_preference(),
   }
   self:_run_code_in_coroutine(function()
     if self.provider_type == "ssh" then
@@ -1025,36 +1024,25 @@ end
 
 ---@private
 ---Get preference if the local client should be launched or not
----@return boolean preference Should we launch local client?
+---@return boolean preference Should the local client be launched
 function Provider:_get_local_client_start_preference()
-  ---@type remote-nvim.providers.WorkspaceConfig
-  local workspace_config = self._config_provider:get_workspace_config(self.unique_host_id)
-  local should_start_client = workspace_config.client_auto_start
-
-  if should_start_client == nil then
+  local on_launch = self._ws_config.on_launch or {}
+  if on_launch.launch_local_client == nil then
     local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
-      prompt = "Launch local Neovim client?",
+      prompt = "Launch local neovim client?",
     })
 
-    -- Handle choices
     if choice == "Yes (always)" then
-      should_start_client = true
-      self._host_ws_config.client_auto_start = should_start_client
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        client_auto_start = should_start_client,
-      })
+      on_launch.launch_local_client = true
     elseif choice == "No (never)" then
-      should_start_client = false
-      self._host_ws_config.client_auto_start = should_start_client
-      self._config_provider:update_workspace_config(self.unique_host_id, {
-        client_auto_start = should_start_client,
-      })
+      on_launch.launch_local_client = false
     else
-      should_start_client = (choice == "Yes" and true) or false
+      return (choice == "Yes" and true) or false
     end
+    self._ws_config.on_launch = on_launch
+    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
   end
-
-  return should_start_client
+  return on_launch.launch_local_client
 end
 
 ---@private
@@ -1065,7 +1053,7 @@ function Provider:_launch_local_neovim_client()
 
     remote_nvim.config.client_callback(
       self._local_free_port,
-      self._config_provider:get_workspace_config(self.unique_host_id)
+      self._config_provider:get_workspace_config(self.unique_ws_id)
     )
   else
     remote_nvim.dashboard:show()
@@ -1079,7 +1067,7 @@ function Provider:_launch_neovim(start_run)
   if start_run == nil then
     start_run = true
   end
-  self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_host_id))
+  self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_ws_id))
   if not self:is_remote_server_running() then
     if start_run then
       self:start_progress_view_run(("Launch Neovim (Run no. %s)"):format(self._neovim_launch_number))
@@ -1087,10 +1075,10 @@ function Provider:_launch_neovim(start_run)
     end
     self:_setup_workspace_variables()
     self:_setup_remote()
-    self:_spawn_remote_neovim_server(false)
+    self:_spawn_remote_neovim_server()
   end
   self:_launch_local_neovim_client()
-  self.logger.fmt_debug(("[%s][%s] Completed remote neovim launch"):format(self.provider_type, self.unique_host_id))
+  self.logger.fmt_debug(("[%s][%s] Completed remote neovim launch"):format(self.provider_type, self.unique_ws_id))
 end
 
 ---Launch Neovim
@@ -1103,12 +1091,12 @@ end
 
 function Provider:sync()
   self:_run_code_in_coroutine(function()
-      self.logger.fmt_debug(("[%s][%s] Starting sync with remote"):format(self.provider_type, self.unique_host_id))
+      self.logger.fmt_debug(("[%s][%s] Starting sync with remote"):format(self.provider_type, self.unique_ws_id))
       if not self:is_remote_server_running() then
         self:start_progress_view_run("Sync Neovim with remote")
         self:_setup_workspace_variables(true)
         self:_setup_remote()
-        self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_host_id))
+        self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_ws_id))
       end
     end,
     "Syncing up Neovim on remote host")
@@ -1117,13 +1105,13 @@ end
 function Provider:spawn()
   self:_run_code_in_coroutine(function()
       self.logger.fmt_debug(("[%s][%s] Spawning new neovim server on remote"):format(self.provider_type,
-        self.unique_host_id))
+        self.unique_ws_id))
       if not self:is_remote_server_running() then
         self:start_progress_view_run(("Spawn new client"))
         self:_setup_workspace_variables(false)
         self:_setup_remote()
-        self:_spawn_remote_neovim_server(true)
-        self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_host_id))
+        self:_spawn_remote_neovim_server()
+        self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_ws_id))
       end
     end,
     "Spawning noeim server on remote")
@@ -1192,7 +1180,7 @@ function Provider:_cleanup_remote_host()
   end
   vim.notify(("Cleanup on remote host '%s' completed"):format(self.host), vim.log.levels.INFO)
 
-  self._config_provider:remove_workspace_config(self.unique_host_id)
+  self._config_provider:remove_workspace_config(self.unique_ws_id)
 end
 
 ---@private
@@ -1234,7 +1222,7 @@ end
 ---@param exit_cb function? Exit callback to execute
 ---@param on_local_executor boolean? Should run this command on the local executor
 function Provider:run_command(command, desc, extra_opts, exit_cb, on_local_executor)
-  self.logger.fmt_debug("[%s][%s] Running %s", self.provider_type, self.unique_host_id, command)
+  self.logger.fmt_debug("[%s][%s] Running %s", self.provider_type, self.unique_ws_id, command)
   on_local_executor = on_local_executor or false
   local executor = on_local_executor and self.local_executor or self.executor
   local section_node = self.progress_viewer:add_progress_node({
@@ -1254,7 +1242,7 @@ function Provider:run_command(command, desc, extra_opts, exit_cb, on_local_execu
     exit_cb = exit_cb,
     stdout_cb = self:_get_stdout_fn_for_node(section_node),
   })
-  self.logger.fmt_debug("[%s][%s] Running %s completed", self.provider_type, self.unique_host_id, command)
+  self.logger.fmt_debug("[%s][%s] Running %s completed", self.provider_type, self.unique_ws_id, command)
   if exit_cb == nil then
     self:_handle_job_completion(desc, section_node)
   end
@@ -1296,7 +1284,7 @@ function Provider:upload(local_paths, remote_path, desc, compression_opts)
   self.logger.fmt_debug(
     "[%s][%s] Uploading %s to %s on remote",
     self.provider_type,
-    self.unique_host_id,
+    self.unique_ws_id,
     local_path,
     remote_path
   )
@@ -1358,7 +1346,7 @@ function Provider:session_action(opts)
   elseif opts.session_action == "sync" then
     self:sync()
   elseif opts.session_action == "spawn" then
-    self:spawn()
+    self:launch_neovim()
   end
 end
 

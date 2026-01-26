@@ -401,10 +401,11 @@ function Dashboard:_initialize_workspaces_tree()
     })
     self.workspaces_pane_tree:add_node(toggle_head, root_id)
     local toggle_head_id = toggle_head:get_id()
-    local add_toggle_line = function(key, value)
+    ws_cfg.on_launch = ws_cfg.on_launch or {}
+    local add_toggle_line = function(key)
       local node = NuiTree.Node({
         key = key,
-        value = ws_cfg[key],
+        value = ws_cfg.on_launch[key],
         type = "toggle_node",
         locked = false,
         parent_node = root_node,
@@ -413,10 +414,11 @@ function Dashboard:_initialize_workspaces_tree()
       self.workspaces_pane_tree:add_node(node, toggle_head_id)
       root_node.last_child_id = node:get_id()
     end
-    add_toggle_line("config_copy")
-    add_toggle_line("dot_config_copy")
-    add_toggle_line("data_copy")
-    add_toggle_line("client_auto_start")
+    add_toggle_line("persistent_connection")
+    add_toggle_line("copy_nvim_config")
+    add_toggle_line("copy_dot_config")
+    add_toggle_line("copy_nvim_data")
+    add_toggle_line("launch_local_client")
   end
   local workspaces = workspace_cfg:get_workspace_config()
   for id, ws in pairs(workspaces) do
@@ -730,19 +732,20 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
 
         ---@type remote-nvim.providers.WorkspaceConfig
         local ws_cfg = node.workspace_config
-        local new_ws_cfg = workspace_cfg:get_workspace_config(ws_cfg.unique_id, ws_cfg.provider)
-        local value = new_ws_cfg[node.key]
+        local on_launch = workspace_cfg:get_workspace_config(ws_cfg.unique_id, ws_cfg.provider).on_launch
+        local value = on_launch[node.key]
 
         if value == nil then
-          new_ws_cfg[node.key] = true
+          on_launch[node.key] = true
         elseif value then
-          new_ws_cfg[node.key] = false
+          on_launch[node.key] = false
         else
-          new_ws_cfg[node.key] = nil
+          on_launch[node.key] = nil
         end
+        ws_cfg.on_launch = on_launch
         workspace_cfg:update_workspace_config(ws_cfg.unique_id)
-        workspace_cfg:update_workspace_config(ws_cfg.unique_id, new_ws_cfg)
-        node.value = new_ws_cfg[node.key]
+        workspace_cfg:update_workspace_config(ws_cfg.unique_id, ws_cfg)
+        node.value = on_launch[node.key]
         tree:render(start_linenr)
       end,
       desc = "[t]oggle launch option",
@@ -809,7 +812,7 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
           error("Unknown provider type")
         end
         self:_set_buffer(self.nui.bufnr)
-        provider:spawn()
+        provider:launch_neovim()
       end,
       desc = "Spawn [N]ew Connection",
     },
@@ -898,10 +901,11 @@ end
 
 ---@format disable
 toggle_key_strings = {
-  config_copy =       "Sync neovim config ",
-  dot_config_copy =   "Sync .config       ",
-  data_copy =         "Sync neovim data   ",
-  client_auto_start = "Start local client "
+  persistent_connection = "Launch persistent connection ",
+  copy_nvim_config =      "Copy neovim config to remote ",
+  copy_dot_config =       "Copy .config to remote       ",
+  copy_nvim_data =        "Copy neovim data  to remote  ",
+  launch_local_client =   "Launch local client          "
 }
 
 return Dashboard:init()
