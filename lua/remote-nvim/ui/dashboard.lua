@@ -136,25 +136,64 @@ function Dashboard:_set_buffer(bufnr)
   end
 end
 
--- ---Switch to one of the pane in Progress View window
--- ---@param pane "progress_view"|"session_info"|"help"
--- ---@param collapse_nodes boolean?
--- function Dashboard:switch_to_pane(pane, collapse_nodes)
---   collapse_nodes = collapse_nodes or false
---   if pane == "progress_view" then
---     self:_set_buffer(self.nui.bufnr)
---     if collapse_nodes then
---       self:_collapse_all_nodes(self.progress_view_pane_tree, self.progress_view_tree_render_linenr)
---     end
---   elseif pane == "session_info" then
---     self:_set_buffer(self.session_info_pane_bufnr)
---     if collapse_nodes then
---       self:_collapse_all_nodes(self.session_info_pane_tree, self.session_info_tree_render_linenr)
---     end
---   else
---     self:_set_buffer(self.help_pane_bufnr)
---   end
--- end
+---@private
+---Collapse all nodes for a tree
+---@param tree NuiTree The tree whose all nodes should be collapsed
+---@param start_linenr integer On which line should tree start rendering
+local collapse_all_nodes = function(tree, start_linenr)
+  local updated = false
+
+  for _, node in pairs(tree.nodes.by_id) do
+    updated = node:collapse() or updated
+  end
+
+  if updated then
+    tree:render(start_linenr)
+  end
+end
+
+---@private
+---Expand all nodes for a tree
+---@param tree NuiTree The tree whose all nodes should be expanded
+---@param start_linenr integer On which line should tree start rendering
+local expand_all_nodes = function(tree, start_linenr)
+  local updated = false
+
+  for _, node in pairs(tree.nodes.by_id) do
+    updated = node:expand() or updated
+  end
+
+  if updated then
+    tree:render(start_linenr)
+  end
+end
+
+---Switch to one of the pane in Progress View window
+---@param pane "progress_view"|"workspaces"|"connections"|"help"
+---@param collapse_nodes boolean?
+function Dashboard:switch_to_pane(pane, collapse_nodes)
+  collapse_nodes = collapse_nodes or false
+  if pane == "progress_view" then
+    self:_set_buffer(self.nui.bufnr)
+    if collapse_nodes then
+      collapse_all_nodes(self.progress_view_pane_tree, self.progress_view_tree_render_linenr)
+    end
+  elseif pane == "workspaces" then
+    self:_setup_workspaces_pane()
+    self:_set_buffer(self.workspaces_pane_bufnr)
+    if collapse_nodes then
+      collapse_all_nodes(self.workspaces_pane_tree, self.workspaces_tree_render_linenr)
+    end
+  elseif pane == "connections" then
+    self:_setup_connections_pane()
+    self:_set_buffer(self.connections_pane_bufnr)
+    if collapse_nodes then
+      collapse_all_nodes(self.connections_pane_tree, self.connections_tree_render_linenr)
+    end
+  else
+    self:_set_buffer(self.help_pane_bufnr)
+  end
+end
 
 ---@private
 ---Set top line for each of the buffer
@@ -206,38 +245,6 @@ end
 ---Hide the progress viewer
 function Dashboard:hide()
   self.nui:hide()
-end
-
----@private
----Collapse all nodes for a tree
----@param tree NuiTree The tree whose all nodes should be collapsed
----@param start_linenr integer On which line should tree start rendering
-local collapse_all_nodes = function(tree, start_linenr)
-  local updated = false
-
-  for _, node in pairs(tree.nodes.by_id) do
-    updated = node:collapse() or updated
-  end
-
-  if updated then
-    tree:render(start_linenr)
-  end
-end
-
----@private
----Expand all nodes for a tree
----@param tree NuiTree The tree whose all nodes should be expanded
----@param start_linenr integer On which line should tree start rendering
-local expand_all_nodes = function(tree, start_linenr)
-  local updated = false
-
-  for _, node in pairs(tree.nodes.by_id) do
-    updated = node:expand() or updated
-  end
-
-  if updated then
-    tree:render(start_linenr)
-  end
 end
 
 ---Returns next run counter
@@ -296,7 +303,7 @@ function Dashboard:_setup_progress_view_pane()
       line:append(node.text, highlight)
 
       if node_type == "run_node" and vim.tbl_contains({ "success", "failed" }, node_status) then
-        line:append(" (no longer active)", hl_groups.RemoteNvimSubInfo.name)
+        line:append(" (finished)", hl_groups.RemoteNvimSubInfo.name)
       end
 
       if node_type == "command_node" then
@@ -394,7 +401,6 @@ function Dashboard:_initialize_workspaces_tree()
     add_line("Last sync       ", ws_cfg.last_sync)
     local toggle_head = NuiTree.Node({
       key = "Launch options",
-      -- value = value,
       type = "toggle_head",
       parent_node = root_node,
       workspace_config = ws_cfg,
@@ -414,6 +420,7 @@ function Dashboard:_initialize_workspaces_tree()
       self.workspaces_pane_tree:add_node(node, toggle_head_id)
       root_node.last_child_id = node:get_id()
     end
+    add_toggle_line("provide_connection_id")
     add_toggle_line("persistent_connection")
     add_toggle_line("copy_nvim_config")
     add_toggle_line("copy_dot_config")
@@ -832,6 +839,7 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
           conn_opts = { ws_cfg.connection_options },
           devpod_opts = devpod_utils.get_workspace_devpod_opts(ws_cfg),
           progress_view = require("remote-nvim.ui.progressview")(),
+          unique_host_id = ws_cfg.unique_id
         }
         ---@type remote-nvim.providers.Provider
         local provider
@@ -901,6 +909,7 @@ end
 
 ---@format disable
 toggle_key_strings = {
+  provide_connection_id = "Provide manual connection id ",
   persistent_connection = "Launch persistent connection ",
   copy_nvim_config =      "Copy neovim config to remote ",
   copy_dot_config =       "Copy .config to remote       ",

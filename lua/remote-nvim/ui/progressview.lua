@@ -83,11 +83,12 @@ function ProgressView:update_status(status, should_update_parent_status, node)
   -- Update parent node's status as well
   if should_update_parent_status then
     local parent_node_id = node:get_parent_id()
-    while parent_node_id ~= nil do
+    if parent_node_id ~= nil then
       local parent_node = self.progress_view_pane_tree:get_node(parent_node_id)
-      parent_node.status = status
-      ---@diagnostic disable-next-line:need-check-nil
-      parent_node_id = parent_node:get_parent_id()
+      self:update_status(status, should_update_parent_status, parent_node)
+      -- parent_node.status = status
+      -- ---@diagnostic disable-next-line:need-check-nil
+      -- parent_node_id = parent_node:get_parent_id()
     end
   end
 

@@ -87,7 +87,7 @@ function SSHConnections:_update_connections()
   local files = ScanDir.scan_dir(path)
   local conn_ids = {}
   for _, v in ipairs(files) do
-    local id = v:match("ssh_connection_([%w_]+)%.sock")
+    local id = v:match("ssh_connection_([%w_-]+)%.sock")
     if id then
       table.insert(conn_ids, id)
     else

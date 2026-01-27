@@ -6,7 +6,9 @@
 
 ---Optional flags that control behaviour on launching remote connection. Missing flags will result in a prompt
 ---@class remote-nvim.providers.WorkspaceConfig.OnLaunch
+---@field provide_connection_id? boolean
 ---@field persistent_connection? boolean
+---@field provide_id? boolean
 ---@field copy_nvim_config? boolean
 ---@field copy_dot_config? boolean
 ---@field copy_nvim_data? boolean
@@ -38,7 +40,7 @@
 ---@field protected connections remote-nvim.providers.Connections Connections provider instance
 ---@field protected progress_viewer remote-nvim.ui.ProgressView Progress viewer for progress
 ---@field private offline_mode boolean Operating in offline mode or not
----@field protected _host_config remote-nvim.providers.WorkspaceConfig Host workspace configuration
+---@field protected _ws_config remote-nvim.providers.WorkspaceConfig Host workspace configuration
 ---@field protected _config_provider remote-nvim.ConfigProvider Host workspace configuration
 ---@field private _provider_stopped_neovim boolean If neovim was stopped by the provider
 ---@field private logger plenary.logger Logger instance
@@ -195,6 +197,7 @@ function Provider:_setup_workspace_variables(sync)
   else
     self.logger.debug("Found an existing workspace & host. Re-using the same configuration..")
   end
+
   self._ws_config = self._config_provider:get_workspace_config(self.unique_ws_id)
 
   local rename_id
@@ -204,7 +207,6 @@ function Provider:_setup_workspace_variables(sync)
     self._ws_config.neovim_version = nil
     self._ws_config.remote_neovim_home = nil
     self._ws_config.neovim_install_method = nil
-    self._ws_config.persistent = nil
     self._ws_config.on_launch = {}
     self._ws_config.offline_mode = nil
   end
@@ -915,6 +917,8 @@ function Provider:_spawn_remote_neovim_server()
     type = "section_node",
     text = "Waiting for the ssh socket",
   })
+
+  local connection_id = self:_get_connection_id_preference()
   ---@type remote-nvim.providers.Connections.ConnectionInfo
   local connection_info = {
     unique_host_id = self.unique_ws_id,
@@ -922,6 +926,7 @@ function Provider:_spawn_remote_neovim_server()
     local_port = self._local_free_port,
     workspace = self._ws_config,
     persistent = self:_get_persistent_connection_preference(),
+    connection_id = connection_id,
   }
   self:_run_code_in_coroutine(function()
     if self.provider_type == "ssh" then
@@ -962,7 +967,8 @@ function Provider:_spawn_remote_neovim_server()
     type = "section_node",
     text = ("Remote server available at localhost:%s"):format(self._local_free_port),
   })
-  self.progress_viewer:update_status("success", nil, port_node)
+  self.progress_viewer:update_status("success", true, port_node)
+  remote_nvim.dashboard:switch_to_pane("connections")
 end
 
 ---@protected
@@ -1024,6 +1030,45 @@ end
 
 ---@private
 ---Get preference if the local client should be launched or not
+---@return string connection_id
+function Provider:_get_connection_id_preference()
+  local on_launch = self._ws_config.on_launch or {}
+  local provide = false
+  if on_launch.provide_connection_id == nil then
+    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
+      prompt = "Provide user-defined connection id",
+    })
+
+    if choice == "Yes (always)" then
+      on_launch.provide_connection_id = true
+      provide = true
+      self._ws_config.on_launch = on_launch
+      self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
+    elseif choice == "No (never)" then
+      on_launch.provide_connection_id = false
+      self._ws_config.on_launch = on_launch
+      self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
+    else
+      provide = choice == "Yes"
+    end
+  end
+  local connection_id
+  if provide then
+    connection_id = vim.trim(vim.fn.input("workspace id: "))
+  else
+    connection_id = remote_nvim.config.connection_id_callback(self._ws_config)
+  end
+  local matched = connection_id:match("([%w_-]+)")
+  if matched ~= connection_id then
+    -- local charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    -- if string.find(connection_id, "[^" .. charset .. "]") then
+    vim.notify("Invalid id.", vim.log.levels.ERROR)
+  end
+  return matched
+end
+
+---@private
+---Get preference if the local client should be launched or not
 ---@return boolean preference Should the local client be launched
 function Provider:_get_local_client_start_preference()
   local on_launch = self._ws_config.on_launch or {}
@@ -1070,7 +1115,7 @@ function Provider:_launch_neovim(start_run)
   self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_ws_id))
   if not self:is_remote_server_running() then
     if start_run then
-      self:start_progress_view_run(("Launch Neovim (Run no. %s)"):format(self._neovim_launch_number))
+      self:start_progress_view_run(("Launch Neovim"):format(self._neovim_launch_number))
       self._neovim_launch_number = self._neovim_launch_number + 1
     end
     self:_setup_workspace_variables()

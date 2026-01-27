@@ -91,7 +91,8 @@ local utils = require("remote-nvim.utils")
 --server is stored. This is assumed to be a directory and entire directory would be copied over
 ---@field progress_view remote-nvim.config.PluginConfig.ProgressViewConfig Progress view configuration
 ---@field local_client_config remote-nvim.config.RemoteConfig.LocalClientConfig? Configuration for the local client
----@field client_callback function<string, remote-nvim.providers.WorkspaceConfig> Function that would be called upon to start a Neovim client
+---@field client_callback fun(port: string, cfg: remote-nvim.providers.WorkspaceConfig) Function that would be called upon to start a Neovim client
+---@field connection_id_callback fun(cfg: remote-nvim.providers.WorkspaceConfig):string  Function that would be called upon to start a Neovim client
 ---@field offline_mode remote-nvim.config.PluginConfig.OfflineModeConfig Offline mode configuration
 ---@field log remote-nvim.config.PluginConfig.LogConfig Plugin logging options
 ---@field ui remote-nvim.config.PluginConfig.UiConfig Plugin ui options
@@ -201,6 +202,9 @@ M.default_opts = {
         vim.notify(("Local client failed with exit code %s"):format(exit_code), vim.log.levels.ERROR)
       end
     end)
+  end,
+  connection_id_callback = function(_)
+    return utils.generate_random_string(10)
   end,
   neovim_install_script_path = utils.path_join(
     utils.is_windows,
