@@ -107,8 +107,8 @@ function SSHConnections:_update_connections()
     end
   end
   for id, _ in pairs(old_connection_data) do
-    vim.notify(("Found ssh connection with id '%s' with missing socket. "):format(id),
-      vim.log.levels.INFO)
+    -- vim.notify(("Found ssh connection with id '%s' with missing socket. "):format(id),
+    --   vim.log.levels.INFO)
   end
   self:_save_persistent_connections(new_connection_data)
 

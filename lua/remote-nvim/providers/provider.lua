@@ -683,18 +683,35 @@ function Provider:_remote_neovim_binary_dir()
 end
 
 ---@private
+function Provider:_verify_install()
+  local command = self:remote_path_join(self._remote_scripts_path,
+    "verify_ws.sh " .. self._remote_workspace_id .. " " .. self._remote_neovim_version)
+  local desc = "Verifying workspace on remote"
+  local verified = false
+  local exit_cb = function() return function(exit_code) verified = exit_code == 0 end end
+  self:run_command(command, desc, "", exit_cb)
+  return verified
+end
+
+---@private
 ---Setup remote
-function Provider:_setup_remote()
+function Provider:_setup_remote(sync)
   if not self._setup_running then
     self._setup_running = true
+    if not sync then
+      if self:_verify_install() then
+        self._setup_running = false
+        return
+      end
+    end
 
     -- Create necessary directories
     local necessary_dirs = {
       self._remote_scripts_path,
-      utils.path_join(self._remote_is_windows, self._remote_xdg_config_path, remote_nvim.config.remote.app_name),
-      utils.path_join(self._remote_is_windows, self._remote_xdg_cache_path, remote_nvim.config.remote.app_name),
-      utils.path_join(self._remote_is_windows, self._remote_xdg_state_path, remote_nvim.config.remote.app_name),
-      utils.path_join(self._remote_is_windows, self._remote_xdg_data_path, remote_nvim.config.remote.app_name),
+      self:remote_path_join(self._remote_xdg_config_path, remote_nvim.config.remote.app_name),
+      self:remote_path_join(self._remote_xdg_cache_path, remote_nvim.config.remote.app_name),
+      self:remote_path_join(self._remote_xdg_state_path, remote_nvim.config.remote.app_name),
+      self:remote_path_join(self._remote_xdg_data_path, remote_nvim.config.remote.app_name),
       self:_remote_neovim_binary_dir(),
     }
     local mkdirs_cmds = {}
@@ -787,6 +804,7 @@ function Provider:_setup_remote()
         release_name
       )
       local local_upload_paths = { local_release_path }
+      local remote_checksum = self:remote_path_join(self:_remote_neovim_binary_dir(), release_name .. ".sha256sum")
       local do_upload = true
       if self._remote_neovim_install_method == "binary" then
         local upload_desc = "Checking remote binary installation checksum"
@@ -795,7 +813,6 @@ function Provider:_setup_remote()
           type = "section_node",
         })
         local local_checksum = local_release_path .. ".sha256sum"
-        local remote_checksum = self:remote_path_join(self:_remote_neovim_binary_dir(), "nvim.sha256sum")
 
         local equal = self:compare_checksums(local_checksum, remote_checksum, section_node)
         do_upload = not equal
@@ -816,7 +833,7 @@ function Provider:_setup_remote()
         local sha_command = "sha256sum "
             .. self:remote_path_join(self:_remote_neovim_binary_dir(), release_name)
             .. " | cut -d ' ' -f 1 > "
-            .. self:remote_path_join(self:_remote_neovim_binary_dir(), "nvim.sha256sum")
+            .. remote_checksum
         self:run_command(sha_command, "Create remote checksum")
         install_neovim_cmd = install_neovim_cmd .. " -o"
         self:run_command(install_neovim_cmd, "Installing Neovim (if required)")
@@ -1123,7 +1140,7 @@ function Provider:_launch_neovim(start_run)
       self:start_progress_view_run("Launch Neovim")
     end
     self:_setup_workspace_variables()
-    self:_setup_remote()
+    self:_setup_remote(false)
     self:_spawn_remote_neovim_server()
   end
   self:_launch_local_neovim_client()
@@ -1144,7 +1161,7 @@ function Provider:sync()
       if not self:is_remote_server_running() then
         self:start_progress_view_run("Sync Neovim with remote")
         self:_setup_workspace_variables(true)
-        self:_setup_remote()
+        self:_setup_remote(true)
         self.logger.fmt_debug(("[%s][%s] Completed remote neovim sync"):format(self.provider_type, self.unique_ws_id))
       end
     end,
@@ -1158,7 +1175,7 @@ function Provider:spawn()
       if not self:is_remote_server_running() then
         self:start_progress_view_run(("Spawn new client"))
         self:_setup_workspace_variables(false)
-        self:_setup_remote()
+        self:_setup_remote(false)
         self:_spawn_remote_neovim_server()
         self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_ws_id))
       end
