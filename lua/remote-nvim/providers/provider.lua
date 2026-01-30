@@ -775,15 +775,16 @@ function Provider:_setup_remote()
         )
       end
 
+      local release_name = provider_utils.get_offline_neovim_release_name(
+        self._remote_os,
+        self._remote_neovim_version,
+        self._remote_arch,
+        self._remote_neovim_install_method
+      )
       local local_release_path = utils.path_join(
         utils.is_windows,
         remote_nvim.config.offline_mode.cache_dir,
-        provider_utils.get_offline_neovim_release_name(
-          self._remote_os,
-          self._remote_neovim_version,
-          self._remote_arch,
-          self._remote_neovim_install_method
-        )
+        release_name
       )
       local local_upload_paths = { local_release_path }
       local do_upload = true
@@ -794,10 +795,9 @@ function Provider:_setup_remote()
           type = "section_node",
         })
         local local_checksum = local_release_path .. ".sha256sum"
-        local remote_upload_path = utils.path_join(self._remote_is_windows, self:_remote_neovim_binary_dir())
-        local remote_checksum = remote_upload_path .. ".sha256sum"
+        local remote_checksum = self:remote_path_join(self:_remote_neovim_binary_dir(), "nvim.sha256sum")
 
-        local equal = self:compare_checksums(local_checksum, remote_checksum)
+        local equal = self:compare_checksums(local_checksum, remote_checksum, section_node)
         do_upload = not equal
         local check_result = equal and "Upload skipped because remote already has a binary with matching checksum"
             or "Checksums not equal. Uploading local binary"
@@ -810,9 +810,14 @@ function Provider:_setup_remote()
       if do_upload then
         self:upload(
           local_upload_paths,
-          utils.path_join(self._remote_is_windows, self:_remote_neovim_binary_dir()),
+          self:_remote_neovim_binary_dir(),
           "Upload Neovim release from local to remote"
         )
+        local sha_command = "sha256sum "
+            .. self:remote_path_join(self:_remote_neovim_binary_dir(), release_name)
+            .. " | cut -d ' ' -f 1 > "
+            .. self:remote_path_join(self:_remote_neovim_binary_dir(), "nvim.sha256sum")
+        self:run_command(sha_command, "Create remote checksum")
         install_neovim_cmd = install_neovim_cmd .. " -o"
         self:run_command(install_neovim_cmd, "Installing Neovim (if required)")
       end
@@ -1115,8 +1120,7 @@ function Provider:_launch_neovim(start_run)
   self.logger.fmt_debug(("[%s][%s] Starting remote neovim launch"):format(self.provider_type, self.unique_ws_id))
   if not self:is_remote_server_running() then
     if start_run then
-      self:start_progress_view_run(("Launch Neovim"):format(self._neovim_launch_number))
-      self._neovim_launch_number = self._neovim_launch_number + 1
+      self:start_progress_view_run("Launch Neovim")
     end
     self:_setup_workspace_variables()
     self:_setup_remote()
@@ -1353,8 +1357,9 @@ end
 ---Download checksum from remote and compare to a local checksum
 ---@param local_checksum string Local checksum path
 ---@param remote_checksum string Chechsum path on the remote
+---@param section_node NuiTree.Node Section node on which the output nodes would be attached
 ---@param compression_opts remote-nvim.provider.Executor.JobOpts.CompressionOpts? Compression options
-function Provider:compare_checksums(local_checksum, remote_checksum, compression_opts)
+function Provider:compare_checksums(local_checksum, remote_checksum, section_node, compression_opts)
   local cache_path = Path:new(utils.path_join(utils.is_windows, vim.fn.stdpath("cache"), constants.PLUGIN_NAME))
   if not cache_path:exists() then
     cache_path:mkdir({ parents = true, exists_ok = true }) -- Ensure that the path exists
@@ -1362,14 +1367,22 @@ function Provider:compare_checksums(local_checksum, remote_checksum, compression
   cache_path = cache_path:absolute()
   local tmp_sha = utils.path_join(utils.is_windows, cache_path, "remote_checksum.sha256sum")
 
-  local section_node = self.progress_viewer:add_progress_node({
+  self.progress_viewer:add_progress_node({
     text = ("COPY %s -> %s"):format(remote_checksum, tmp_sha),
     type = "command_node",
-  })
+  }, section_node)
+  local downloaded
   self.executor:download(remote_checksum, tmp_sha, {
     stdout_cb = self:_get_stdout_fn_for_node(section_node),
+    exit_cb = function(exit_code)
+      downloaded = exit_code == 0
+    end,
     compression = compression_opts or {},
   })
+  if not downloaded then
+    self.executor:run_command("echo", {}) -- clear job status
+    return false
+  end
   local command = "cmp -s " .. local_checksum .. " " .. tmp_sha
   local equal = false
   self.local_executor:run_command(command, {
@@ -1378,8 +1391,10 @@ function Provider:compare_checksums(local_checksum, remote_checksum, compression
     end,
     stdout_cb = self:_get_stdout_fn_for_node(section_node),
   })
+  if not equal then
+    self.executor:run_command("echo", {}) -- clear job status
+  end
   os.remove(tmp_sha)
-  self:_handle_job_completion("Compared checksums", section_node)
   return equal
 end
 

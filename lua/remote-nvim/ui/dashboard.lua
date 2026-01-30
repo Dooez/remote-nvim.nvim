@@ -239,6 +239,7 @@ function Dashboard:show()
     self.nui:update_layout(self.nui_options)
   end
   self.nui:show()
+  vim.api.nvim_win_set_buf(self.nui.winid, self.workspaces_pane_bufnr)
   vim.api.nvim_set_current_win(self.nui.winid)
 end
 
@@ -346,6 +347,7 @@ function Dashboard:_initialize_workspaces_tree()
 
       if node_type == "root_node" then
         line:append((node:is_expanded() and " " or " ") .. node.key .. ": ", hl_groups.RemoteNvimHeading.name)
+        line:append(node.value or "<not-provided>", hl_groups.RemoteNvimInfoValue.name)
       elseif node_type == "toggle_head" then
         line:append((node:is_expanded() and " " or " ") .. node.key, hl_groups.RemoteNvimInfoKey.name)
       elseif node_type == "toggle_node" then
@@ -569,7 +571,7 @@ function Dashboard:_setup_help_pane()
   self:_set_buffer_keymaps(self.help_pane_bufnr, keymaps)
 
   -- Get tree keymaps (we use this to set help and do not set up any extra keybindings)
-  local tree_keymaps = self:_get_tree_keymaps(self.progress_view_pane_tree, self.progress_view_tree_render_linenr)
+  local tree_keymaps = self:_get_tree_keymaps()
   vim.list_extend(keymaps, tree_keymaps)
 
   local max_length = 0
@@ -581,20 +583,29 @@ function Dashboard:_setup_help_pane()
   vim.bo[self.help_pane_bufnr].modifiable = true
 
   -- Add Keyboard shortcuts heading
-  local line = NuiLine()
-  line:append(" Keyboard shortcuts", hl_groups.RemoteNvimHeading.name)
-  line:render(self.help_pane_bufnr, -1, line_nr)
-  vim.api.nvim_buf_set_lines(self.help_pane_bufnr, line_nr, line_nr, true, { "" })
-  line_nr = line_nr + 2
-
-  for _, v in ipairs(keymaps) do
-    line = NuiLine()
-
-    line:append("  " .. v.key .. string.rep(" ", max_length - #v.key), hl_groups.RemoteNvimInfoKey.name)
-    line:append(" " .. v.desc, hl_groups.RemoteNvimInfoValue.name)
+  local add_heading = function(text)
+    local line = NuiLine()
+    line:append(text, hl_groups.RemoteNvimHeading.name)
     line:render(self.help_pane_bufnr, -1, line_nr)
-    line_nr = line_nr + 1
+    vim.api.nvim_buf_set_lines(self.help_pane_bufnr, line_nr, line_nr, true, { "" })
+    line_nr = line_nr + 2
   end
+  local add_keymaps = function(km)
+    for _, v in ipairs(km) do
+      local line = NuiLine()
+
+      line:append("  " .. v.key .. string.rep(" ", max_length - #v.key), hl_groups.RemoteNvimInfoKey.name)
+      line:append(" " .. v.desc, hl_groups.RemoteNvimInfoValue.name)
+      line:render(self.help_pane_bufnr, -1, line_nr)
+      line_nr = line_nr + 1
+    end
+  end
+  add_heading(" Keyboard shortcuts")
+  add_keymaps(keymaps)
+  add_heading(" Workspaces keymaps")
+  add_keymaps(self:_get_workspaces_keymaps())
+  add_heading(" Connections keymaps")
+  add_keymaps(self:_get_connections_keymaps())
 
   for key, val in pairs(self.buf_options) do
     vim.api.nvim_set_option_value(key, val, {
@@ -604,17 +615,16 @@ function Dashboard:_setup_help_pane()
 end
 
 ---@private
----@param tree NuiTree Tree on which keymaps will be set
----@param start_linenr number What line number on the buffer should the tree be rendered from
+---@param tree? NuiTree Tree on which keymaps will be set
+---@param start_linenr? number What line number on the buffer should the tree be rendered from
 ---@return remote-nvim.ui.Dashboard.Keymaps[]
 function Dashboard:_get_tree_keymaps(tree, start_linenr)
-  if tree == nil or start_linenr == nil then
-    return {}
-  end
+  local skip_action = tree == nil or start_linenr == nil
+  local empty       = function() end
   return {
     {
       key = "l",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
 
         if node and node:expand() then
@@ -627,7 +637,7 @@ function Dashboard:_get_tree_keymaps(tree, start_linenr)
     },
     {
       key = "h",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
 
         if node and node:collapse() then
@@ -640,7 +650,7 @@ function Dashboard:_get_tree_keymaps(tree, start_linenr)
     },
     {
       key = "<CR>",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
 
         if node then
@@ -658,14 +668,14 @@ function Dashboard:_get_tree_keymaps(tree, start_linenr)
     },
     {
       key = "L",
-      action = function()
+      action = skip_action and empty or function()
         expand_all_nodes(tree, start_linenr)
       end,
       desc = "Expand all headings",
     },
     {
       key = "H",
-      action = function()
+      action = skip_action and empty or function()
         collapse_all_nodes(tree, start_linenr)
       end,
       desc = "Collapse all headings",
@@ -722,17 +732,16 @@ function Dashboard:_get_common_keymaps()
 end
 
 ---@private
----@param tree NuiTree Tree on which keymaps will be set
----@param start_linenr number What line number on the buffer should the tree be rendered from
+---@param tree? NuiTree Tree on which keymaps will be set
+---@param start_linenr? number What line number on the buffer should the tree be rendered from
 ---@return remote-nvim.ui.Dashboard.Keymaps[]
 function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
-  if tree == nil or start_linenr == nil then
-    return {}
-  end
+  local skip_action = tree == nil or start_linenr == nil
+  local empty       = function() end
   return {
     {
       key = "t",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
         if not node.type == "toggle_node" then return end
@@ -755,11 +764,11 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
         node.value = on_launch[node.key]
         tree:render(start_linenr)
       end,
-      desc = "[t]oggle launch option",
+      desc = "toggle launch option",
     },
     {
       key = "A",
-      action = function()
+      action = skip_action and empty or function()
         local ssh_args = vim.trim(vim.fn.input("ssh "))
         if ssh_args == "" then
           return
@@ -789,11 +798,11 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
               conn_opts = { ssh_args },
             }):sync()
       end,
-      desc = "[A]dd new workspace",
+      desc = "Add new workspace",
     },
     {
-      key = "N",
-      action = function()
+      key = "L",
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
 
@@ -820,12 +829,13 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
         end
         self:_set_buffer(self.nui.bufnr)
         provider:launch_neovim()
+        self:switch_to_pane("progress_view")
       end,
-      desc = "Spawn [N]ew Connection",
+      desc = "Launch new connection",
     },
     {
-      key = "E",
-      action = function()
+      key = "S",
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
 
@@ -859,17 +869,16 @@ function Dashboard:_get_workspaces_keymaps(tree, start_linenr)
 end
 
 ---@private
----@param tree NuiTree Tree on which keymaps will be set
----@param start_linenr number What line number on the buffer should the tree be rendered from
+---@param tree? NuiTree Tree on which keymaps will be set
+---@param start_linenr? number What line number on the buffer should the tree be rendered from
 ---@return remote-nvim.ui.Dashboard.Keymaps[]
 function Dashboard:_get_connections_keymaps(tree, start_linenr)
-  if tree == nil or start_linenr == nil then
-    return {}
-  end
+  local skip_action = tree == nil or start_linenr == nil
+  local empty       = function() end
   return {
     {
       key = "Y",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
         ---@type remote-nvim.providers.Connections.ConnectionInfo
@@ -878,22 +887,22 @@ function Dashboard:_get_connections_keymaps(tree, start_linenr)
         vim.fn.setreg("+", launch_cmd)
         vim.notify(("Yanked `%s`"):format(launch_cmd), vim.log.levels.INFO)
       end,
-      desc = "[Y]ank Connection String",
+      desc = "Yank Connection String",
     },
     {
       key = "L",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
         ---@type remote-nvim.providers.Connections.ConnectionInfo
         local info = node.connection
         remote_nvim.config.client_callback(info.local_port, info.workspace)
       end,
-      desc = "[L]aunch new local client",
+      desc = "Launch new local client",
     },
     {
       key = "K",
-      action = function()
+      action = skip_action and empty or function()
         local node = tree:get_node()
         if not node then return end
         ---@type remote-nvim.providers.Connections.ConnectionInfo
@@ -902,7 +911,7 @@ function Dashboard:_get_connections_keymaps(tree, start_linenr)
         ssh_conn:close_connections(info.connection_id)
         self:_setup_connections_pane()
       end,
-      desc = "[K]ill the connection",
+      desc = "Kill the connection",
     },
   }
 end
