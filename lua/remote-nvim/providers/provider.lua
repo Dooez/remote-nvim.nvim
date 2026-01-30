@@ -566,95 +566,33 @@ function Provider:_get_remote_neovim_version_preference(prompt_title)
 end
 
 ---@private
----Get user preference about copying the local neovim data directories to remote
----@return boolean preference Should the config be copied over
-function Provider:_get_persistent_connection_preference()
+---Get choice for one on_launch parameter and update workspace config if persistent choice is made
+---@param id string id of on_launch parameter
+---@param prompt string Prompt shown
+function Provider:_get_on_launch_choice(id, prompt)
   local on_launch = self._ws_config.on_launch or {}
-  if on_launch.persistent_connection == nil then
-    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
-      prompt = "Launch persistent connection?",
+  local current_choice
+  if on_launch[id] == nil then
+    local choice = self:get_selection({ "Yes", "No", "Yes once, then never", "Yes, always", "No, never" }, {
+      prompt = prompt,
     })
-
-    if choice == "Yes (always)" then
+    if choice == "Yes, always" then
+      current_choice = true
       on_launch.persistent_connection = true
-    elseif choice == "No (never)" then
+    elseif choice == "No, never" then
+      current_choice = false
+      on_launch.persistent_connection = false
+    elseif choice == "Yes once, then never" then
+      current_choice = false
       on_launch.persistent_connection = false
     else
       return (choice == "Yes" and true) or false
     end
     self._ws_config.on_launch = on_launch
     self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
+    return current_choice
   end
   return on_launch.persistent_connection
-end
-
----@private
----Get user preference about copying the local neovim data directories to remote
----@return boolean preference Should the config be copied over
-function Provider:_get_neovim_data_upload_preference()
-  local on_launch = self._ws_config.on_launch or {}
-  if on_launch.copy_nvim_data == nil then
-    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
-      prompt = "Copy local Neovim data to remote host? ",
-    })
-
-    if choice == "Yes (always)" then
-      on_launch.copy_nvim_data = true
-    elseif choice == "No (never)" then
-      on_launch.copy_nvim_data = false
-    else
-      return (choice == "Yes" and true) or false
-    end
-    self._ws_config.on_launch = on_launch
-    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
-  end
-  return on_launch.copy_nvim_data
-end
-
----@private
----Get user preference about copying the local config to remote
----@return boolean preference Should the config be copied over
-function Provider:_get_neovim_config_upload_preference()
-  local on_launch = self._ws_config.on_launch or {}
-  if on_launch.copy_nvim_config == nil then
-    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
-      prompt = "Copy local Neovim configuration to remote host? ",
-    })
-
-    if choice == "Yes (always)" then
-      on_launch.copy_nvim_config = true
-    elseif choice == "No (never)" then
-      on_launch.copy_nvim_config = false
-    else
-      return (choice == "Yes" and true) or false
-    end
-    self._ws_config.on_launch = on_launch
-    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
-  end
-  return on_launch.copy_nvim_config
-end
-
----@private
----Get user preference about copying the local .config to remote
----@return boolean preference Should the config be copied over
-function Provider:_get_dot_config_upload_preference()
-  local on_launch = self._ws_config.on_launch or {}
-  if on_launch.copy_dot_config == nil then
-    local choice = self:get_selection({ "Yes", "No", "Yes (always)", "No (never)" }, {
-      prompt = "Copy local .config to remote host? ",
-    })
-
-    if choice == "Yes (always)" then
-      on_launch.copy_dot_config = true
-    elseif choice == "No (never)" then
-      on_launch.copy_dot_config = false
-    else
-      return (choice == "Yes" and true) or false
-    end
-    self._ws_config.on_launch = on_launch
-    self._config_provider:update_workspace_config(self.unique_ws_id, self._ws_config)
-  end
-  return on_launch.copy_dot_config
 end
 
 ---Verify if the server is already running or not
@@ -843,7 +781,7 @@ function Provider:_setup_remote(sync)
     end
 
     -- Upload user neovim config, if necessary
-    if self:_get_neovim_config_upload_preference() then
+    if self:_get_on_launch_choice("copy_nvim_config", "Copy local Neovim configuration to remote host?") then
       self:upload(
         self._local_path_to_remote_neovim_config,
         self._remote_neovim_config_path,
@@ -853,7 +791,7 @@ function Provider:_setup_remote(sync)
     end
 
     if not vim.tbl_isempty(self._local_path_to_remote_dot_config)
-        and self:_get_dot_config_upload_preference() then
+        and self:_get_on_launch_choice("copy_dot_config", "Copy local .config to remote host?") then
       self:upload(
         self._local_path_to_remote_dot_config,
         self._remote_xdg_config_path,
@@ -872,7 +810,7 @@ function Provider:_setup_remote(sync)
     end
 
     if to_copy_dirs
-        and self:_get_neovim_data_upload_preference() then
+        and self:_get_on_launch_choice("copy_nvim_data", "Copy local Neovim data to remote host?") then
       for key, local_paths in pairs(self._local_path_copy_dirs) do
         if not vim.tbl_isempty(local_paths) then
           local remote_upload_path = utils.path_join(
@@ -947,7 +885,7 @@ function Provider:_spawn_remote_neovim_server()
     workspace_id = self._remote_workspace_id,
     local_port = self._local_free_port,
     workspace = self._ws_config,
-    persistent = self:_get_persistent_connection_preference(),
+    persistent = self:_get_on_launch_choice("persistent_connection", "Launch persistent connection?"),
     connection_id = connection_id,
   }
   self:_run_code_in_coroutine(function()
