@@ -20,7 +20,7 @@
 ---@field os os_type? OS running on the remote host
 ---@field arch string? Arch of the remote host
 ---@field host string? Host name to whom the workspace belongs
----@field unique_id string? Host id name to whom the workspace belongs
+---@field unique_id string? Unique workspace+host identifier
 ---@field neovim_version string? Version of Neovim running on the remote
 ---@field connection_options string? Connection options needed to connect to the remote host
 ---@field remote_neovim_home string? Path on remote host where remote-neovim installs/configures things
@@ -39,14 +39,12 @@
 ---@field protected local_executor remote-nvim.providers.Executor Local executor instance
 ---@field protected connections remote-nvim.providers.Connections Connections provider instance
 ---@field protected progress_viewer remote-nvim.ui.ProgressView Progress viewer for progress
----@field private offline_mode boolean Operating in offline mode or not
+---@field private   offline_mode boolean Operating in offline mode or not
 ---@field protected _ws_config remote-nvim.providers.WorkspaceConfig Host workspace configuration
 ---@field protected _config_provider remote-nvim.ConfigProvider Host workspace configuration
 ---@field private _provider_stopped_neovim boolean If neovim was stopped by the provider
 ---@field private logger plenary.logger Logger instance
 ---@field private _setup_running boolean Is the setup running?
----@field private _neovim_launch_number number Active run number
----@field private _cleanup_run_number number Active run number
 ---@field private _local_free_port string? Free port available on local machine
 ---@field private _local_neovim_install_script_path string Local path where Neovim installation script is stored
 ---@field private _local_path_to_remote_neovim_config string[] Local path(s) containing remote Neovim configuration
@@ -149,8 +147,6 @@ function Provider:init(opts)
   self.local_executor = Executor()
   self.executor = self.local_executor
   self.progress_viewer = opts.progress_view
-  self._cleanup_run_number = 1
-  self._neovim_launch_number = 1
 
   -- Remote configuration parameters
   opts.devpod_opts = opts.devpod_opts or {}
@@ -838,7 +834,7 @@ end
 
 ---@private
 ---Spawn remote server
-function Provider:_spawn_remote_neovim_server()
+function Provider:_launch_remote_neovim_server()
   -- Find free port on remote
   local free_port_on_remote_cmd = ("%s -l %s"):format(
     self:_remote_neovim_binary_path(),
@@ -1020,8 +1016,6 @@ function Provider:_get_connection_id_preference()
   end
   local matched = connection_id:match("([%w_-]+)")
   if matched ~= connection_id then
-    -- local charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
-    -- if string.find(connection_id, "[^" .. charset .. "]") then
     vim.notify("Invalid id.", vim.log.levels.ERROR)
   end
   return matched
@@ -1079,7 +1073,7 @@ function Provider:_launch_neovim(start_run)
     end
     self:_setup_workspace_variables()
     self:_setup_remote(false)
-    self:_spawn_remote_neovim_server()
+    self:_launch_remote_neovim_server()
   end
   self:_launch_local_neovim_client()
   self.logger.fmt_debug(("[%s][%s] Completed remote neovim launch"):format(self.provider_type, self.unique_ws_id))
@@ -1106,21 +1100,6 @@ function Provider:sync()
     "Syncing up Neovim on remote host")
 end
 
-function Provider:spawn()
-  self:_run_code_in_coroutine(function()
-      self.logger.fmt_debug(("[%s][%s] Spawning new neovim server on remote"):format(self.provider_type,
-        self.unique_ws_id))
-      if not self:is_remote_server_running() then
-        self:start_progress_view_run(("Spawn new client"))
-        self:_setup_workspace_variables(false)
-        self:_setup_remote(false)
-        self:_spawn_remote_neovim_server()
-        self.logger.fmt_debug(("[%s][%s] spawned new session"):format(self.provider_type, self.unique_ws_id))
-      end
-    end,
-    "Spawning noeim server on remote")
-end
-
 ---Stop running Neovim instance (if any)
 ---@param cb function? Callback to invoke on stopping Neovim instance
 function Provider:stop_neovim(cb)
@@ -1137,8 +1116,7 @@ end
 ---Cleanup remote host
 function Provider:clean_up_remote_host()
   self:_run_code_in_coroutine(function()
-    self:start_progress_view_run(("Remote cleanup (Run no. %s)"):format(self._cleanup_run_number))
-    self._cleanup_run_number = self._cleanup_run_number + 1
+    self:start_progress_view_run("Remote cleanup")
     self:_cleanup_remote_host()
   end, ("Cleaning up '%s' host"):format(self.host))
 end
