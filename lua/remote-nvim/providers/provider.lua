@@ -50,6 +50,7 @@
 ---@field private _local_path_to_remote_neovim_config string[] Local path(s) containing remote Neovim configuration
 ---@field private _local_path_to_remote_dot_config string[] Local path(s) containing remote .config subdirectories
 ---@field private _local_path_copy_dirs table<string, string[]> Local path(s) containing remote Neovim configuration
+---@field private _remote_free_port string? Free port available on remote machine
 ---@field private _remote_neovim_home string Directory where all remote neovim data would be stored on host
 ---@field private _remote_os os_type Remote host's OS
 ---@field private _remote_arch string Remote host's arch
@@ -617,6 +618,7 @@ function Provider:_remote_neovim_binary_dir()
 end
 
 ---@private
+---@return string? remote_free_port
 function Provider:_verify_install()
   local command = self:remote_path_join(self._remote_scripts_path,
     "verify_ws.sh " .. self._remote_workspace_id .. " " .. self._remote_neovim_version)
@@ -624,7 +626,12 @@ function Provider:_verify_install()
   local verified = false
   local exit_cb = function() return function(exit_code) verified = exit_code == 0 end end
   self:run_command(command, desc, "", exit_cb)
-  return verified
+  if verified then
+    local remote_free_port_output = self.executor:job_stdout()
+    local remote_free_port = remote_free_port_output[#remote_free_port_output]
+    self.logger.debug(("remote_free_port: %s"):format(remote_free_port))
+    return remote_free_port
+  end
 end
 
 ---@private
@@ -633,7 +640,8 @@ function Provider:_setup_remote(sync)
   if not self._setup_running then
     self._setup_running = true
     if not sync then
-      if self:_verify_install() then
+      self._remote_free_port = self:_verify_install()
+      if self._remote_free_port ~= nil then
         self._setup_running = false
         return
       end
@@ -809,8 +817,7 @@ function Provider:_setup_remote(sync)
         and self:_get_on_launch_choice("copy_nvim_data", "Copy local Neovim data to remote host?") then
       for key, local_paths in pairs(self._local_path_copy_dirs) do
         if not vim.tbl_isempty(local_paths) then
-          local remote_upload_path = utils.path_join(
-            self._remote_is_windows,
+          local remote_upload_path = self:remote_path_join(
             self["_remote_xdg_" .. key .. "_path"],
             remote_nvim.config.remote.app_name
           )
@@ -835,15 +842,18 @@ end
 ---@private
 ---Spawn remote server
 function Provider:_launch_remote_neovim_server()
-  -- Find free port on remote
-  local free_port_on_remote_cmd = ("%s -l %s"):format(
-    self:_remote_neovim_binary_path(),
-    utils.path_join(self._remote_is_windows, self._remote_scripts_path, "free_port_finder.lua")
-  )
-  self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
-  local remote_free_port_output = self.executor:job_stdout()
-  local remote_free_port = remote_free_port_output[#remote_free_port_output]
-  self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_ws_id, remote_free_port)
+  if not self._remote_free_port then
+    -- Find free port on remote
+
+    local free_port_on_remote_cmd = ("%s -l %s"):format(
+      self:_remote_neovim_binary_path(),
+      self:remote_path_join(self._remote_scripts_path, "free_port_finder.lua")
+    )
+    self:run_command(free_port_on_remote_cmd, "Searching for free port on the remote machine")
+    local remote_free_port_output = self.executor:job_stdout()
+    local remote_free_port = remote_free_port_output[#remote_free_port_output]
+    self.logger.fmt_debug("[%s][%s] Remote free port: %s", self.provider_type, self.unique_ws_id, remote_free_port)
+  end
 
   self._local_free_port = provider_utils.find_free_port()
   self.logger.fmt_debug(
@@ -855,8 +865,8 @@ function Provider:_launch_remote_neovim_server()
 
   -- Launch Neovim server and port forward
   local port_forward_opts = self.provider_type == "ssh" and
-      { "-tt", "-L", ("%s:localhost:%s"):format(self._local_free_port, remote_free_port) } or
-      ([[-t -L %s:localhost:%s]]):format(self._local_free_port, remote_free_port)
+      { "-tt", "-L", ("%s:localhost:%s"):format(self._local_free_port, self._remote_free_port) } or
+      ([[-t -L %s:localhost:%s]]):format(self._local_free_port, self._remote_free_port)
 
   local remote_server_launch_cmd = ([[XDG_CONFIG_HOME=%s XDG_DATA_HOME=%s XDG_STATE_HOME=%s XDG_CACHE_HOME=%s NVIM_APPNAME=%s %s --listen 0.0.0.0:%s --headless]])
       :format(
@@ -866,7 +876,7 @@ function Provider:_launch_remote_neovim_server()
         self._remote_xdg_cache_path,
         remote_nvim.config.remote.app_name,
         self:_remote_neovim_binary_path(),
-        remote_free_port
+        self._remote_free_port
       )
 
   local sock_node = self.progress_viewer:add_progress_node({

@@ -32,3 +32,4 @@ if [[ ! ( -f "${BIN}/bin/nvim" && -x "${BIN}/bin/nvim" ) ]]; then
 		exit 1
 fi
 
+eval "${BIN}/bin/nvim -l ${SCRIPTS_DIR}/free_port_finder.lua"
